@@ -1,0 +1,8 @@
+en:
+  label_yjs: Yjs Collaborative Editing
+  label_hocuspocus_url: Hocuspocus WebSocket URL
+  label_yjs_enabled: Enable Yjs Collaborative Editing
+  
+  text_hocuspocus_url_help: "WebSocket URL of your Hocuspocus server (e.g., ws://hocuspocus:1234 or ws://localhost:1234)"
+  text_yjs_enabled_help: "Enable or disable Yjs collaborative editing in Redmine editors"
+

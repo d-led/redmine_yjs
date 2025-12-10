@@ -1,0 +1,99 @@
+@concurrent
+Feature: Concurrent collaborative editing
+    Real-time collaborative editing between multiple browser sessions
+    using Yjs CRDT synchronization via Hocuspocus WebSocket server.
+
+    Background:
+        Given Redmine is running with Yjs collaborative editing enabled
+        And a test project "Test Project" exists
+        And an issue "Test Issue" exists in "Test Project"
+
+    @ui
+    Scenario: Two users see each other's presence
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        Then browser A shows 1 other editor connected
+        And browser B shows 1 other editor connected
+
+    @ui
+    Scenario: Real-time text synchronization between two browsers
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        When user types "Hello from A" in browser A's editor
+        Then browser B's editor shows "Hello from A"
+        When user types " and hello from B" in browser B's editor
+        Then browser A's editor shows "Hello from A and hello from B"
+        And browser B's editor shows "Hello from A and hello from B"
+
+    @ui
+    Scenario: Concurrent edits are merged without conflict
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        When user types "Start: " at the beginning in browser A's editor
+        And user types " :End" at the end in browser B's editor
+        Then both browsers show "Start:  :End"
+
+    @ui
+    Scenario: Connection status indicator reflects WebSocket state
+        Given user "admin" opens the issue in browser A
+        Then browser A shows connection status "connected"
+        When the Hocuspocus connection is interrupted
+        Then browser A shows connection status "disconnected"
+        When the Hocuspocus connection is restored
+        Then browser A shows connection status "connected"
+
+    @ui
+    Scenario: Reconnection syncs content after disconnection
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        When user types "Before disconnect" in browser A's editor
+        And browser B is disconnected from Hocuspocus
+        And user types " - added while disconnected" in browser A's editor
+        When browser B reconnects to Hocuspocus
+        Then browser B's editor shows "Before disconnect - added while disconnected"
+
+    @ui
+    Scenario: Browser reload does not duplicate content
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        And the editor is empty
+        When user types "First line" in browser A's editor
+        And user types " Second line" in browser B's editor
+        Then browser A's editor shows "First line Second line"
+        And browser B's editor shows "First line Second line"
+        When browser B reloads the page
+        Then browser B's editor shows exactly "First line Second line"
+        And browser B's editor does not show "First line Second lineFirst line Second line"
+        And browser A's editor shows exactly "First line Second line"
+
+    @ui
+    Scenario: Multiple reloads do not accumulate content
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        And the editor is empty
+        When user types "Content" in browser A's editor
+        Then browser B's editor shows "Content"
+        When browser B reloads the page
+        Then browser B's editor shows exactly "Content"
+        When browser B reloads the page
+        Then browser B's editor shows exactly "Content"
+        When browser B reloads the page
+        Then browser B's editor shows exactly "Content"
+        And browser A's editor shows exactly "Content"
+
+    @ui
+    Scenario: Collaboration continues after browser reload
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        And the editor is empty
+        When user types "Before reload" in browser A's editor
+        Then browser B's editor shows "Before reload"
+        When browser B reloads the page
+        Then browser B's editor shows exactly "Before reload"
+        # Continue editing after reload - sync should still work
+        When user types " - After reload from A" in browser A's editor
+        Then browser B's editor shows "Before reload - After reload from A"
+        When user types " - And from B" in browser B's editor
+        Then browser A's editor shows "Before reload - After reload from A - And from B"
+        And browser B's editor shows "Before reload - After reload from A - And from B"
+

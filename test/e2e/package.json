@@ -1,0 +1,25 @@
+{
+  "name": "redmine-yjs-e2e-tests",
+  "version": "1.0.0",
+  "description": "End-to-end tests for Redmine Yjs collaborative editing plugin",
+  "scripts": {
+    "test": "cucumber-js",
+    "test:report": "npx playwright show-report",
+    "prettier": "prettier -w ."
+  },
+  "devDependencies": {
+    "@cucumber/cucumber": "^12.3.0",
+    "@cucumber/html-formatter": "^22.2.0",
+    "@cucumber/pretty-formatter": "^2.4.1",
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^22.19.1",
+    "cucumber-console-formatter": "^1.0.0",
+    "prettier": "^3.7.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
+

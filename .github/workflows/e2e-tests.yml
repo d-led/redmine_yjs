@@ -1,0 +1,117 @@
+name: E2E Tests - Collaborative Editing
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '**/*.ts'
+      - '**/*.js'
+      - '**/*.rb'
+      - '**/*.erb'
+      - '**/*.css'
+      - 'test/e2e/**'
+      - 'hocuspocus/**'
+      - '.github/workflows/e2e-tests.yml'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: 'Run with debug logging'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  HOST: '127.0.0.1'
+
+jobs:
+  e2e-tests:
+    name: Playwright E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-${{ hashFiles('test/e2e/package-lock.json', 'test/e2e/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install test dependencies
+        working-directory: test/e2e
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install Playwright browsers
+        working-directory: test/e2e
+        run: npx playwright install chromium --with-deps
+
+      - name: Start Docker services
+        working-directory: test/e2e
+        run: |
+          echo "🐳 Starting Docker Compose services..."
+          docker compose -f docker-compose.test.yml up --build -d
+          echo "✅ Docker services started (TypeScript tests will wait for readiness)"
+
+      - name: Run E2E tests
+        working-directory: test/e2e
+        env:
+          SUT_BASE_URL: 'http://127.0.0.1:3000'
+          HOCUSPOCUS_URL: 'http://127.0.0.1:8081'
+          HOCUSPOCUS_WS_URL: 'ws://127.0.0.1:8081'
+          HEADLESS: 'true'
+          DEBUG: ${{ github.event.inputs.debug || 'false' }}
+        run: |
+          mkdir -p reports/screenshots
+          npm test -- --format @cucumber/pretty-formatter
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-report
+          path: test/e2e/reports/
+          retention-days: 14
+
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-screenshots
+          path: test/e2e/reports/screenshots/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Show Docker logs on failure
+        if: failure()
+        working-directory: test/e2e
+        run: |
+          echo "=== Redmine logs ==="
+          docker compose -f docker-compose.test.yml logs --tail=100 redmine || true
+          echo ""
+          echo "=== Hocuspocus logs ==="
+          docker compose -f docker-compose.test.yml logs --tail=100 hocuspocus || true
+
+      - name: Cleanup Docker services
+        if: always()
+        working-directory: test/e2e
+        run: |
+          echo "🧹 Cleaning up Docker services..."
+          docker compose -f docker-compose.test.yml down -v --remove-orphans || true
+          docker system prune -f --volumes || true
+          echo "✅ Cleanup complete"

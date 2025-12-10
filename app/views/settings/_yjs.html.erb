@@ -1,0 +1,14 @@
+<div class="box tabular">
+  <p>
+    <label><%= l(:label_hocuspocus_url) %></label>
+    <%= text_field_tag 'settings[hocuspocus_url]', @settings['hocuspocus_url'], size: 60 %>
+    <em class="info"><%= l(:text_hocuspocus_url_help) %></em>
+  </p>
+  
+  <p>
+    <label><%= l(:label_yjs_enabled) %></label>
+    <%= check_box_tag 'settings[yjs_enabled]', '1', @settings['yjs_enabled'] == '1' %>
+    <em class="info"><%= l(:text_yjs_enabled_help) %></em>
+  </p>
+</div>
+

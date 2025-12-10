@@ -1,0 +1,17 @@
+{
+  "name": "redmine-yjs-plugin",
+  "version": "1.0.0",
+  "description": "Yjs collaborative editing plugin for Redmine",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "build:deps": "node build-deps.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.1"
+  },
+  "dependencies": {
+    "@hocuspocus/provider": "^3.4.1",
+    "yjs": "^13.6.27"
+  }
+}

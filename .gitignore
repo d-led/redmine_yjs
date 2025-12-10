@@ -1,0 +1,8 @@
+# Node.js dependencies
+node_modules/
+/package-lock.json
+yarn.lock
+
+# Build artifacts (keep bundled file for distribution)
+# yjs-deps.bundle.js should be committed for distribution
+

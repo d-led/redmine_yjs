@@ -1,0 +1,58 @@
+<% content_for :header_tags do %>
+<script>
+  console.log('[Yjs] Assets partial loaded');
+  console.log('[Yjs] Helper check:', {
+    respond_to_yjs_enabled: <%= respond_to?(:yjs_enabled?) %>,
+    yjs_enabled: <%= respond_to?(:yjs_enabled?) && yjs_enabled? ? 'true' : 'false' rescue 'error' %>,
+    hocuspocus_url_available: <%= respond_to?(:hocuspocus_url) %>
+  });
+</script>
+<% end %>
+
+<% if respond_to?(:yjs_enabled?) && yjs_enabled? %>
+  <% content_for :header_tags do %>
+  <script>
+    console.log('[Yjs] Plugin enabled - including assets');
+    console.log('[Yjs] Plugin enabled check:', {
+      respond_to_yjs_enabled: <%= respond_to?(:yjs_enabled?) %>,
+      yjs_enabled: <%= yjs_enabled? ? 'true' : 'false' %>,
+      hocuspocus_url: '<%= j(hocuspocus_url) %>'
+    });
+  </script>
+  <%= stylesheet_link_tag 'yjs-collaboration', plugin: 'redmine_yjs' %>
+  <%= javascript_include_tag 'https://cdn.jsdelivr.net/npm/yjs@13.6.27/dist/yjs.umd.js', defer: false %>
+  <%= javascript_include_tag 'https://cdn.jsdelivr.net/npm/@hocuspocus/provider@2.10.0/dist/hocuspocus-provider.umd.js', defer: false %>
+  <%= javascript_include_tag 'yjs-collaboration', plugin: 'redmine_yjs', defer: true %>
+  <script>
+    console.log('[Yjs] Configuration script loaded');
+    // Pass configuration to JavaScript
+    window.RedmineYjsConfig = {
+      hocuspocusUrl: '<%= j(hocuspocus_url) %>',
+      enabled: <%= yjs_enabled? ? 'true' : 'false' %>
+    };
+    
+    // Pass current user information
+    <% if User.current.logged? %>
+    window.currentUser = {
+      id: '<%= j(User.current.id.to_s) %>',
+      name: '<%= j(User.current.name) %>'
+    };
+    console.log('[Yjs] User logged in:', window.currentUser);
+    <% else %>
+    window.currentUser = {
+      id: 'anonymous',
+      name: 'Anonymous'
+    };
+    console.log('[Yjs] User anonymous');
+    <% end %>
+    
+    console.log('[Yjs] Config set:', window.RedmineYjsConfig);
+  </script>
+<% else %>
+  <script>
+    console.log('[Yjs] Plugin disabled or helper not available:', {
+      respond_to_yjs_enabled: <%= respond_to?(:yjs_enabled?) %>,
+      yjs_enabled: <%= respond_to?(:yjs_enabled?) && yjs_enabled? ? 'true' : 'false' rescue 'error' %>
+    });
+  </script>
+<% end %>
