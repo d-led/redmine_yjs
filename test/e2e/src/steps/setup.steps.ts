@@ -10,6 +10,19 @@ import { config } from '../support/config';
 const slowExpect = expect.configure({ timeout: 15000 });
 
 /**
+ * Get the base URL based on world configuration
+ */
+function getBaseUrl(world: ICustomWorld): string {
+  if (world.usePlaintextInstance) {
+    return config.BASE_URL_PLAINTEXT;
+  }
+  if (world.useProxyInstance) {
+    return config.BASE_URL_PROXY;
+  }
+  return config.BASE_URL;
+}
+
+/**
  * Login to Redmine as admin
  */
 async function loginAsAdmin(world: ICustomWorld, browser: 'A' | 'B'): Promise<void> {
@@ -20,7 +33,8 @@ async function loginAsAdmin(world: ICustomWorld, browser: 'A' | 'B'): Promise<vo
     return; // Already logged in
   }
   
-  await page.goto(`${config.BASE_URL}/login`);
+  const baseUrl = getBaseUrl(world);
+  await page.goto(`${baseUrl}/login`);
   await page.fill('#username', config.admin.login);
   await page.fill('#password', config.admin.password);
   await page.click('input[type="submit"][name="login"]');
@@ -53,6 +67,13 @@ Given('Redmine is running with Yjs collaborative editing enabled', async functio
   console.log('[Setup] ✅ Redmine is running');
 });
 
+Given('Redmine is configured with plain text editor', async function (this: ICustomWorld) {
+  // Switch to plaintext instance for subsequent steps
+  // This will be used by the "opens the issue" steps
+  this.usePlaintextInstance = true;
+  console.log('[Setup] ✅ Using plain text editor instance');
+});
+
 Given('Redmine is running with Yjs collaborative editing enabled in proxy mode', async function (this: ICustomWorld) {
   // Health check already done in BeforeAll hook
   // Just verify we can reach the home page
@@ -67,12 +88,13 @@ Given('a test project {string} exists', { timeout: 30000 }, async function (this
   const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
   this.currentProjectId = projectId;
   
+  const baseUrl = getBaseUrl(this);
   // Try to access the project first
-  const response = await this.pageA!.goto(`${config.BASE_URL}/projects/${projectId}`);
+  const response = await this.pageA!.goto(`${baseUrl}/projects/${projectId}`);
   
   if (response?.status() === 404) {
     // Project doesn't exist, create it
-    await this.pageA!.goto(`${config.BASE_URL}/projects/new`);
+    await this.pageA!.goto(`${baseUrl}/projects/new`);
     await this.pageA!.fill('#project_name', projectName);
     await this.pageA!.fill('#project_identifier', projectId);
     
@@ -95,9 +117,10 @@ Given('an issue {string} exists in {string}', { timeout: 30000 }, async function
   await loginAsAdmin(this, 'A');
   
   const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
+  const baseUrl = getBaseUrl(this);
   
   // Check if issue already exists by searching
-  await this.pageA!.goto(`${config.BASE_URL}/projects/${projectId}/issues?set_filter=1&f[]=subject&op[subject]=~&v[subject][]=${encodeURIComponent(issueSubject)}`);
+  await this.pageA!.goto(`${baseUrl}/projects/${projectId}/issues?set_filter=1&f[]=subject&op[subject]=~&v[subject][]=${encodeURIComponent(issueSubject)}`);
   
   const existingIssue = this.pageA!.locator(`table.issues td.subject:has-text("${issueSubject}")`);
   const issueExists = await existingIssue.count() > 0;
@@ -115,7 +138,7 @@ Given('an issue {string} exists in {string}', { timeout: 30000 }, async function
   }
   
   // Create new issue
-  await this.pageA!.goto(`${config.BASE_URL}/projects/${projectId}/issues/new`);
+  await this.pageA!.goto(`${baseUrl}/projects/${projectId}/issues/new`);
   await this.pageA!.fill('#issue_subject', issueSubject);
   
   // Wait for any CKEditor to initialize (if used)
@@ -141,12 +164,13 @@ Given('a wiki page {string} exists in {string}', { timeout: 30000 }, async funct
   this.currentProjectId = projectId;
   this.currentWikiPage = pageName;
   
+  const baseUrl = getBaseUrl(this);
   // Try to access the wiki page
-  const response = await this.pageA!.goto(`${config.BASE_URL}/projects/${projectId}/wiki/${pageName}`);
+  const response = await this.pageA!.goto(`${baseUrl}/projects/${projectId}/wiki/${pageName}`);
   
   if (response?.status() === 404 || await this.pageA!.locator('.nodata, .wiki-404').count() > 0) {
     // Page doesn't exist, create it
-    await this.pageA!.goto(`${config.BASE_URL}/projects/${projectId}/wiki/${pageName}/edit`);
+    await this.pageA!.goto(`${baseUrl}/projects/${projectId}/wiki/${pageName}/edit`);
     
     // Wait for editor to load
     await this.pageA!.waitForTimeout(1000);

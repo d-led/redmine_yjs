@@ -354,11 +354,17 @@
    * Returns {x, y} coordinates relative to the textarea's visible area
    */
   function calculateTextareaCursorPosition(textarea, cursorPos) {
-    // Create a hidden div that mirrors the textarea's styling
-    const mirror = document.createElement('div');
     const style = window.getComputedStyle(textarea);
+    const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
     
-    // Copy all relevant styles
+    // Get padding and border values
+    const paddingTop = parseFloat(style.paddingTop) || 0;
+    const paddingLeft = parseFloat(style.paddingLeft) || 0;
+    
+    // Create a hidden div that mirrors the textarea's styling exactly
+    const mirror = document.createElement('div');
+    
+    // Copy all relevant styles that affect text rendering
     [
       'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
       'letterSpacing', 'textTransform', 'wordSpacing',
@@ -371,44 +377,82 @@
     
     mirror.style.position = 'absolute';
     mirror.style.visibility = 'hidden';
-    mirror.style.whiteSpace = 'pre-wrap';
+    mirror.style.whiteSpace = 'pre-wrap'; // Match textarea behavior
     mirror.style.wordWrap = 'break-word';
     mirror.style.width = textarea.offsetWidth + 'px';
     mirror.style.height = 'auto';
-    mirror.style.overflow = 'hidden';
-    mirror.style.top = '0';
-    mirror.style.left = '0';
+    mirror.style.overflow = 'visible';
+    
+    // Position mirror exactly where textarea is for accurate measurement
+    const textareaRect = textarea.getBoundingClientRect();
+    mirror.style.top = textareaRect.top + 'px';
+    mirror.style.left = textareaRect.left + 'px';
     
     document.body.appendChild(mirror);
     
     try {
       const text = textarea.value.substring(0, cursorPos);
-      const textNode = document.createTextNode(text);
-      mirror.appendChild(textNode);
       
-      // Create a span to mark cursor position
-      const cursorMarker = document.createElement('span');
-      cursorMarker.textContent = '\u200b'; // Zero-width space
-      mirror.appendChild(cursorMarker);
+      // Insert marker at cursor position
+      const marker = document.createElement('span');
+      marker.style.display = 'inline-block';
+      marker.style.width = '1px';
+      marker.style.height = lineHeight + 'px';
+      marker.style.verticalAlign = 'top';
+      marker.style.backgroundColor = 'transparent';
       
-      // Get position relative to mirror's top-left (which represents textarea content origin)
-      const mirrorRect = mirror.getBoundingClientRect();
-      const markerRect = cursorMarker.getBoundingClientRect();
+      // Build mirror content: text before cursor + marker
+      mirror.textContent = '';
+      if (text.length > 0) {
+        const textNode = document.createTextNode(text);
+        mirror.appendChild(textNode);
+      }
+      mirror.appendChild(marker);
       
-      // Position within the full content (as if not scrolled)
-      const contentX = markerRect.left - mirrorRect.left;
-      const contentY = markerRect.top - mirrorRect.top;
+      // Force layout recalculation
+      void mirror.offsetHeight;
       
-      // Subtract scroll to get position within visible area
-      // If scrolled down 100px and cursor is at content Y=150, show at visual Y=50
+      // Get bounding rectangles
+      const markerRect = marker.getBoundingClientRect();
+      
+      // Calculate position relative to textarea's top-left corner
+      // markerRect is already in viewport coordinates, textareaRect is too
+      const absoluteX = markerRect.left - textareaRect.left;
+      const absoluteY = markerRect.top - textareaRect.top;
+      
+      // Account for scroll position
+      // When textarea is scrolled, content moves but cursor container doesn't
       const scrollTop = textarea.scrollTop;
       const scrollLeft = textarea.scrollLeft;
       
-      const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
+      // Final position: absolute position minus scroll
+      // This gives us position relative to the visible textarea area
+      const x = absoluteX - scrollLeft;
+      const y = absoluteY - scrollTop;
       
       return {
-        x: contentX - scrollLeft,
-        y: contentY - scrollTop,
+        x: Math.max(0, x),
+        y: Math.max(0, y),
+        lineHeight: lineHeight
+      };
+    } catch (e) {
+      console.warn('[Yjs] Error calculating textarea cursor position:', e);
+      // Fallback: estimate based on line count
+      const text = textarea.value.substring(0, cursorPos);
+      const lines = text.split('\n');
+      const currentLine = lines.length - 1;
+      const currentLineText = lines[currentLine] || '';
+      
+      // Estimate X from line text length (rough approximation)
+      const charWidth = parseFloat(style.fontSize) * 0.6; // Approximate character width
+      const estimatedX = currentLineText.length * charWidth;
+      const yInContent = currentLine * lineHeight;
+      const scrollTop = textarea.scrollTop;
+      const scrollLeft = textarea.scrollLeft;
+      
+      return {
+        x: Math.max(0, paddingLeft + estimatedX - scrollLeft),
+        y: Math.max(0, paddingTop + yInContent - scrollTop),
         lineHeight: lineHeight
       };
     } finally {

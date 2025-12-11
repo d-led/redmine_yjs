@@ -4,15 +4,25 @@ ARG REDMINE_TAG=6.0
 
 FROM redmine:${REDMINE_TAG}
 
-# Install SQLite and curl for health checks
+# Install SQLite, curl, git for health checks and plugin installation
 # Note: sqlite3 gem is already included in Redmine 6.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     libsqlite3-dev \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/redmine
+
+# Install CKEditor plugin for testing (if not already present)
+# CKEditor is needed for some E2E tests
+RUN if [ ! -d "plugins/redmine_ckeditor" ]; then \
+      echo "Installing CKEditor plugin..."; \
+      git clone --depth 1 --branch master https://github.com/a-ono/redmine_ckeditor.git plugins/redmine_ckeditor || \
+      git clone --depth 1 https://github.com/a-ono/redmine_ckeditor.git plugins/redmine_ckeditor || \
+      echo "Warning: Could not install CKEditor plugin"; \
+    fi
 
 # Copy the plugin (context is plugin root)
 COPY . /usr/src/redmine/plugins/redmine_yjs/
@@ -20,6 +30,16 @@ COPY . /usr/src/redmine/plugins/redmine_yjs/
 # Copy plugin assets to public directory (Redmine 6.x requirement)
 RUN mkdir -p /usr/src/redmine/public/plugin_assets/redmine_yjs \
     && cp -r /usr/src/redmine/plugins/redmine_yjs/assets/* /usr/src/redmine/public/plugin_assets/redmine_yjs/ 2>/dev/null || true
+
+# Add websocket-client-simple gem for ActionCable proxy mode
+# This gem is only needed when websocket_proxy is enabled
+RUN echo "gem 'websocket-client-simple', '~> 0.3.0', require: false" >> Gemfile || true
+
+# Install gems for plugins (CKEditor and websocket-client-simple)
+RUN bundle install --without development test || true
+
+# Copy ActionCable config for WebSocket proxy mode
+COPY test/e2e/cable.yml /usr/src/redmine/config/cable.yml
 
 # Copy entrypoint script
 COPY test/e2e/test-entrypoint.sh /usr/local/bin/test-entrypoint.sh

@@ -10,6 +10,19 @@ import { config } from '../support/config';
 const slowExpect = expect.configure({ timeout: 15000 });
 
 /**
+ * Get the base URL based on world configuration
+ */
+function getBaseUrl(world: ICustomWorld): string {
+  if (world.usePlaintextInstance) {
+    return config.BASE_URL_PLAINTEXT;
+  }
+  if (world.useProxyInstance) {
+    return config.BASE_URL_PROXY;
+  }
+  return config.BASE_URL;
+}
+
+/**
  * Login to Redmine if not already logged in
  */
 async function ensureLoggedIn(world: ICustomWorld, browser: 'A' | 'B'): Promise<void> {
@@ -20,7 +33,8 @@ async function ensureLoggedIn(world: ICustomWorld, browser: 'A' | 'B'): Promise<
     return;
   }
   
-  await page.goto(`${config.BASE_URL}/login`);
+  const baseUrl = getBaseUrl(world);
+  await page.goto(`${baseUrl}/login`);
   await page.fill('#username', config.admin.login);
   await page.fill('#password', config.admin.password);
   await page.click('input[type="submit"][name="login"]');
@@ -32,8 +46,9 @@ async function ensureLoggedIn(world: ICustomWorld, browser: 'A' | 'B'): Promise<
 /**
  * Navigate to issue edit page and wait for editor to be ready
  */
-async function openIssueEdit(page: Page, issueId: number): Promise<void> {
-  await page.goto(`${config.BASE_URL}/issues/${issueId}/edit`);
+async function openIssueEdit(page: Page, issueId: number, world: ICustomWorld): Promise<void> {
+  const baseUrl = getBaseUrl(world);
+  await page.goto(`${baseUrl}/issues/${issueId}/edit`);
   
   // Wait for page to load
   await page.waitForLoadState('domcontentloaded');
@@ -59,8 +74,9 @@ async function openIssueEdit(page: Page, issueId: number): Promise<void> {
 /**
  * Navigate to wiki page edit and wait for editor to be ready
  */
-async function openWikiEdit(page: Page, projectId: string, pageName: string): Promise<void> {
-  await page.goto(`${config.BASE_URL}/projects/${projectId}/wiki/${pageName}/edit`);
+async function openWikiEdit(page: Page, projectId: string, pageName: string, world: ICustomWorld): Promise<void> {
+  const baseUrl = getBaseUrl(world);
+  await page.goto(`${baseUrl}/projects/${projectId}/wiki/${pageName}/edit`);
   
   // Wait for page to load
   await page.waitForLoadState('domcontentloaded');
@@ -196,7 +212,7 @@ Given('user {string} opens the issue in browser A', { timeout: 30000 }, async fu
     throw new Error('No issue ID available. Make sure "an issue exists" step ran first.');
   }
   
-  await openIssueEdit(this.pageA!, this.currentIssueId);
+  await openIssueEdit(this.pageA!, this.currentIssueId, this);
   console.log(`[Collab] Browser A opened issue ${this.currentIssueId} for editing`);
 });
 
@@ -207,8 +223,13 @@ Given('user {string} opens the same issue in browser B', { timeout: 30000 }, asy
     throw new Error('No issue ID available. Make sure "an issue exists" step ran first.');
   }
   
-  await openIssueEdit(this.pageB!, this.currentIssueId);
+  await openIssueEdit(this.pageB!, this.currentIssueId, this);
   console.log(`[Collab] Browser B opened issue ${this.currentIssueId} for editing`);
+  
+  // Wait for awareness to sync between both browsers
+  // Both browsers need to see each other's presence
+  await this.pageA!.waitForTimeout(2000);
+  await this.pageB!.waitForTimeout(2000);
 });
 
 Given('user {string} opens the wiki page edit in browser A', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
@@ -218,7 +239,7 @@ Given('user {string} opens the wiki page edit in browser A', { timeout: 30000 },
     throw new Error('No wiki page context. Make sure "a wiki page exists" step ran first.');
   }
   
-  await openWikiEdit(this.pageA!, this.currentProjectId, this.currentWikiPage);
+  await openWikiEdit(this.pageA!, this.currentProjectId, this.currentWikiPage, this);
   console.log(`[Collab] Browser A opened wiki page ${this.currentWikiPage} for editing`);
 });
 
@@ -229,7 +250,7 @@ Given('user {string} opens the same wiki page edit in browser B', { timeout: 300
     throw new Error('No wiki page context. Make sure "a wiki page exists" step ran first.');
   }
   
-  await openWikiEdit(this.pageB!, this.currentProjectId, this.currentWikiPage);
+  await openWikiEdit(this.pageB!, this.currentProjectId, this.currentWikiPage, this);
   console.log(`[Collab] Browser B opened wiki page ${this.currentWikiPage} for editing`);
 });
 
@@ -319,6 +340,59 @@ When('user types {string} at the end in browser B\'s editor', async function (th
   await this.pageB!.waitForTimeout(500);
 });
 
+When('user sets cursor to position {int} in browser A\'s editor', async function (this: ICustomWorld, position: number) {
+  // Set cursor position in textarea or CKEditor
+  const textarea = this.pageA!.locator(
+    'textarea[id*="description"], textarea[id*="notes"], textarea[id*="content"]'
+  ).first();
+  
+  if (await textarea.count() > 0) {
+    // Plain text editor - set selection range
+    await textarea.evaluate((el: HTMLTextAreaElement, pos: number) => {
+      el.focus();
+      el.setSelectionRange(pos, pos);
+      el.dispatchEvent(new Event('click', { bubbles: true }));
+    }, position);
+  } else {
+    // CKEditor - try to set cursor position
+    const iframeLocator = this.pageA!.locator('iframe.cke_wysiwyg_frame').first();
+    if (await iframeLocator.count() > 0) {
+      const elementHandle = await iframeLocator.elementHandle();
+      if (elementHandle) {
+        const frame = await elementHandle.contentFrame();
+        if (frame) {
+          await frame.evaluate((pos: number) => {
+            const walker = document.createTreeWalker(
+              document.body,
+              NodeFilter.SHOW_TEXT
+            );
+            let currentOffset = 0;
+            let node;
+            while ((node = walker.nextNode())) {
+              const nodeLength = node.textContent?.length || 0;
+              if (currentOffset + nodeLength >= pos) {
+                const range = document.createRange();
+                const offsetInNode = pos - currentOffset;
+                range.setStart(node, Math.min(offsetInNode, nodeLength));
+                range.setEnd(node, Math.min(offsetInNode, nodeLength));
+                const selection = window.getSelection();
+                selection?.removeAllRanges();
+                selection?.addRange(range);
+                return;
+              }
+              currentOffset += nodeLength;
+            }
+          }, position);
+        }
+      }
+    }
+  }
+  
+  // Wait for cursor position to sync
+  await this.pageA!.waitForTimeout(500);
+  console.log(`[Collab] Set cursor to position ${position} in browser A`);
+});
+
 When('the Hocuspocus connection is interrupted', async function (this: ICustomWorld) {
   // Block WebSocket connections by intercepting routes
   await this.pageA!.route('**/*', route => {
@@ -366,25 +440,89 @@ When('browser B reconnects to Hocuspocus', async function (this: ICustomWorld) {
 
 Then('browser A shows {int} other editor(s) connected', async function (this: ICustomWorld, count: number) {
   // Look for presence indicators in the collaboration status widget
-  const statusWidget = this.pageA!.locator('#yjs-collaboration-status, .yjs-collaboration-status-widget');
+  // Use .first() to avoid strict mode violation (multiple status widgets might exist)
+  const statusWidget = this.pageA!.locator('#yjs-collaboration-status, .yjs-collaboration-status-widget').first();
   
   if (count === 0) {
     // Should show "No other editors" or similar
     await slowExpect(statusWidget).toContainText(/no other editor|connected.*\(.*0\)/i);
   } else {
-    // Should show user badges or count
+    // Wait for awareness to sync - check that badge count stabilizes
+    // Awareness updates are debounced, so we need to wait for them to settle
+    let badgeCount = 0;
+    let stableCount = 0;
+    const maxAttempts = 10;
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      await this.pageA!.waitForTimeout(1000);
+      const userBadges = statusWidget.locator('.yjs-user-badge');
+      const currentCount = await userBadges.count();
+      
+      if (currentCount === badgeCount) {
+        stableCount++;
+        if (stableCount >= 2) {
+          // Count has been stable for 2 checks, use it
+          badgeCount = currentCount;
+          break;
+        }
+      } else {
+        badgeCount = currentCount;
+        stableCount = 0;
+      }
+    }
+    
+    // Debug: log what we found
     const userBadges = statusWidget.locator('.yjs-user-badge');
+    if (badgeCount !== count) {
+      const badgeTexts = await userBadges.allTextContents();
+      console.log(`[Collab] Browser A: Expected ${count} badges, found ${badgeCount}:`, badgeTexts);
+      // Also log the widget HTML for debugging
+      const widgetHtml = await statusWidget.innerHTML().catch(() => '');
+      console.log(`[Collab] Browser A widget HTML:`, widgetHtml.substring(0, 500));
+    }
+    
     await slowExpect(userBadges).toHaveCount(count);
   }
 });
 
 Then('browser B shows {int} other editor(s) connected', async function (this: ICustomWorld, count: number) {
-  const statusWidget = this.pageB!.locator('#yjs-collaboration-status, .yjs-collaboration-status-widget');
+  const statusWidget = this.pageB!.locator('#yjs-collaboration-status, .yjs-collaboration-status-widget').first();
   
   if (count === 0) {
     await slowExpect(statusWidget).toContainText(/no other editor|connected.*\(.*0\)/i);
   } else {
+    // Wait for awareness to sync - check that badge count stabilizes
+    let badgeCount = 0;
+    let stableCount = 0;
+    const maxAttempts = 10;
+    
+    for (let i = 0; i < maxAttempts; i++) {
+      await this.pageB!.waitForTimeout(1000);
+      const userBadges = statusWidget.locator('.yjs-user-badge');
+      const currentCount = await userBadges.count();
+      
+      if (currentCount === badgeCount) {
+        stableCount++;
+        if (stableCount >= 2) {
+          // Count has been stable for 2 checks, use it
+          badgeCount = currentCount;
+          break;
+        }
+      } else {
+        badgeCount = currentCount;
+        stableCount = 0;
+      }
+    }
+    
+    // Debug: log what we found
     const userBadges = statusWidget.locator('.yjs-user-badge');
+    if (badgeCount !== count) {
+      const badgeTexts = await userBadges.allTextContents();
+      console.log(`[Collab] Browser B: Expected ${count} badges, found ${badgeCount}:`, badgeTexts);
+      const widgetHtml = await statusWidget.innerHTML().catch(() => '');
+      console.log(`[Collab] Browser B widget HTML:`, widgetHtml.substring(0, 500));
+    }
+    
     await slowExpect(userBadges).toHaveCount(count);
   }
 });
@@ -394,6 +532,36 @@ Then('browser A\'s editor shows {string}', async function (this: ICustomWorld, e
   await this.pageA!.waitForTimeout(1000);
   const content = await getEditorContent(this.pageA!);
   expect(content).toContain(expectedText);
+});
+
+Then('browser B shows a cursor at the correct vertical position for browser A', async function (this: ICustomWorld) {
+  // Wait for cursor to appear
+  await this.pageB!.waitForTimeout(1000);
+  
+  // Find cursor elements (should be visible for remote users)
+  const cursorElements = this.pageB!.locator('.yjs-cursor[data-user-id]');
+  const cursorCount = await cursorElements.count();
+  
+  expect(cursorCount).toBeGreaterThan(0);
+  
+  // Check that cursor is visible (not display: none)
+  const firstCursor = cursorElements.first();
+  const isVisible = await firstCursor.isVisible();
+  expect(isVisible).toBe(true);
+  
+  // Verify cursor has a valid position (top and left are set)
+  const top = await firstCursor.evaluate((el: HTMLElement) => {
+    return window.getComputedStyle(el).top;
+  });
+  const left = await firstCursor.evaluate((el: HTMLElement) => {
+    return window.getComputedStyle(el).left;
+  });
+  
+  // Top should be a valid CSS value (not 'auto' or '0px' if content exists)
+  expect(top).not.toBe('auto');
+  expect(left).not.toBe('auto');
+  
+  console.log(`[Collab] Cursor position verified: top=${top}, left=${left}`);
 });
 
 Then('browser B\'s editor shows {string}', async function (this: ICustomWorld, expectedText: string) {
@@ -414,9 +582,10 @@ Then('both browsers show {string}', async function (this: ICustomWorld, expected
 });
 
 Then('browser A shows connection status {string}', async function (this: ICustomWorld, status: string) {
+  // Use .first() to avoid strict mode violation (multiple status elements might exist)
   const statusIndicator = this.pageA!.locator(
     '#yjs-connection-status, .yjs-status-indicator, .yjs-collaboration-status-widget'
-  );
+  ).first();
   
   if (status === 'connected') {
     await slowExpect(statusIndicator).toHaveClass(/connected/);

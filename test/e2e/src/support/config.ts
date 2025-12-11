@@ -17,10 +17,12 @@ const isMacOS = process.platform === 'darwin';
 const defaultHost = isMacOS ? '0.0.0.0' : '127.0.0.1';
 
 interface TestConfig {
-  /** Redmine base URL (direct WebSocket mode) */
+  /** Redmine base URL (direct WebSocket mode, CKEditor) */
   BASE_URL: string;
-  /** Redmine base URL (ActionCable proxy mode) */
+  /** Redmine base URL (ActionCable proxy mode, CKEditor) */
   BASE_URL_PROXY: string;
+  /** Redmine base URL (plain text editor, no CKEditor) */
+  BASE_URL_PLAINTEXT: string;
   /** Hocuspocus WebSocket URL for health checks */
   HOCUSPOCUS_URL: string;
   /** Hocuspocus WebSocket URL that browsers will use */
@@ -45,6 +47,7 @@ interface TestConfig {
 export const config: TestConfig = {
   BASE_URL: process.env.SUT_BASE_URL || `http://${defaultHost}:3000`,
   BASE_URL_PROXY: process.env.SUT_BASE_URL_PROXY || `http://${defaultHost}:3001`,
+  BASE_URL_PLAINTEXT: process.env.SUT_BASE_URL_PLAINTEXT || `http://${defaultHost}:3002`,
   HOCUSPOCUS_URL: process.env.HOCUSPOCUS_URL || `http://${defaultHost}:8081`,
   HOCUSPOCUS_WS_URL: process.env.HOCUSPOCUS_WS_URL || `ws://${defaultHost}:8081`,
   startServer: process.env.START_SERVER === 'true',
@@ -58,8 +61,9 @@ export const config: TestConfig = {
 };
 
 console.log('[Config] Test configuration loaded:');
-console.log(`  BASE_URL (direct): ${config.BASE_URL}`);
-console.log(`  BASE_URL_PROXY (ActionCable): ${config.BASE_URL_PROXY}`);
+console.log(`  BASE_URL (CKEditor, direct): ${config.BASE_URL}`);
+console.log(`  BASE_URL_PROXY (CKEditor, ActionCable): ${config.BASE_URL_PROXY}`);
+console.log(`  BASE_URL_PLAINTEXT (plain text editor): ${config.BASE_URL_PLAINTEXT}`);
 console.log(`  HOCUSPOCUS_URL: ${config.HOCUSPOCUS_URL}`);
 console.log(`  HOCUSPOCUS_WS_URL: ${config.HOCUSPOCUS_WS_URL}`);
 console.log(`  Headless: ${config.headless}`);
