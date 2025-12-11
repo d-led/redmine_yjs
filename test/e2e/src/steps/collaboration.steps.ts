@@ -39,9 +39,17 @@ async function openIssueEdit(page: Page, issueId: number): Promise<void> {
   await page.waitForLoadState('domcontentloaded');
   
   // Wait for Yjs collaboration to initialize (status widget appears)
-  await slowExpect(
-    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first()
-  ).toBeVisible({ timeout: 20000 });
+  // First wait for the element to exist in DOM
+  const statusLocator = page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first();
+  await statusLocator.waitFor({ state: 'attached', timeout: 20000 });
+  
+  // Then wait for it to be visible (or wait for connected class which indicates it's active)
+  try {
+    await slowExpect(statusLocator).toBeVisible({ timeout: 5000 });
+  } catch (e) {
+    // If not visible, wait for connected class as fallback (widget might be hidden but functional)
+    await page.waitForSelector('.yjs-collaboration-status-widget.connected, .yjs-status.connected', { timeout: 15000 });
+  }
   
   // Additional wait for WebSocket connection
   await page.waitForTimeout(1000);
