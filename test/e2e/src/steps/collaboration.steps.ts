@@ -13,9 +13,6 @@ const slowExpect = expect.configure({ timeout: 15000 });
  * Get the base URL based on world configuration
  */
 function getBaseUrl(world: ICustomWorld): string {
-  if (world.usePlaintextInstance) {
-    return config.BASE_URL_PLAINTEXT;
-  }
   if (world.useProxyInstance) {
     return config.BASE_URL_PROXY;
   }
@@ -53,21 +50,19 @@ async function openIssueEdit(page: Page, issueId: number, world: ICustomWorld): 
   // Wait for page to load
   await page.waitForLoadState('domcontentloaded');
   
-  // Wait for the editor to be ready (this is what we actually need)
+  // Wait for the editor to be ready
   const editorLocator = getEditorLocator(page);
   await editorLocator.waitFor({ state: 'attached', timeout: 20000 });
   
-  // Optionally wait for Yjs status widget to exist (but don't fail if it's hidden)
-  // The widget might be hidden by CSS but Yjs is still functional
+  // Wait for Yjs collaboration to initialize
   try {
     const statusLocator = page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first();
     await statusLocator.waitFor({ state: 'attached', timeout: 5000 });
   } catch (e) {
-    // Status widget not found, but editor is ready - continue anyway
     console.log('[openIssueEdit] Status widget not found, but editor is ready');
   }
   
-  // Wait a bit for Yjs to initialize (even if widget is hidden)
+  // Wait a bit for Yjs to initialize
   await page.waitForTimeout(2000);
 }
 
@@ -91,15 +86,19 @@ async function openWikiEdit(page: Page, projectId: string, pageName: string, wor
 }
 
 /**
- * Get the main editor element (textarea or CKEditor)
+ * Get the main editor element (textarea)
  */
 function getEditorLocator(page: Page) {
-  // Try CKEditor first, then fallback to textarea
+  // Try multiple selectors - Redmine uses different IDs for different contexts
   return page.locator(
-    '.cke_editable, ' +
-    'iframe.cke_wysiwyg_frame, ' +
+    'textarea#issue_description, ' +
+    'textarea[name="issue[description]"], ' +
     'textarea[id*="description"], ' +
+    'textarea#issue_notes, ' +
+    'textarea[name="issue[notes]"], ' +
     'textarea[id*="notes"], ' +
+    'textarea#content, ' +
+    'textarea[name="content"], ' +
     'textarea[id*="content"]'
   ).first();
 }
@@ -108,97 +107,88 @@ function getEditorLocator(page: Page) {
  * Get editor content
  */
 async function getEditorContent(page: Page): Promise<string> {
-  // Check if CKEditor iframe is present
-  const iframeLocator = page.locator('iframe.cke_wysiwyg_frame').first();
-  if (await iframeLocator.count() > 0) {
-    const frame = iframeLocator.contentFrame();
-    const body = frame.locator('body');
-    return (await body.textContent()) || '';
-  }
-  
-  // Check for CKEditor contenteditable
-  const ckeEditable = page.locator('.cke_editable').first();
-  if (await ckeEditable.count() > 0) {
-    return (await ckeEditable.textContent()) || '';
-  }
-  
-  // Fallback to textarea
-  const textarea = page.locator(
-    'textarea[id*="description"], textarea[id*="notes"], textarea[id*="content"]'
-  ).first();
-  return await textarea.inputValue();
+  const textarea = getEditorLocator(page);
+  return (await textarea.inputValue()) || '';
 }
 
 /**
- * Type into the editor
+ * Type into the editor (textarea)
  */
 async function typeInEditor(page: Page, text: string, position: 'beginning' | 'end' | 'current' = 'current'): Promise<void> {
-  // Check if CKEditor iframe is present
-  const iframeLocator = page.locator('iframe.cke_wysiwyg_frame').first();
-  if (await iframeLocator.count() > 0) {
-    const frame = iframeLocator.contentFrame();
-    const body = frame.locator('body');
-    await body.click();
-    
-    if (position === 'beginning') {
-      await page.keyboard.press('Control+Home');
-    } else if (position === 'end') {
-      await page.keyboard.press('Control+End');
+  const textarea = getEditorLocator(page);
+  
+  // Wait for the textarea to be attached to DOM first
+  await textarea.waitFor({ state: 'attached', timeout: 30000 });
+  
+  // Debug: log what we found
+  const count = await textarea.count();
+  if (count === 0) {
+    // Try to find any textarea on the page for debugging
+    const allTextareas = await page.locator('textarea').all();
+    console.error(`[typeInEditor] Textarea not found! Found ${allTextareas.length} textareas on page`);
+    for (let i = 0; i < Math.min(allTextareas.length, 5); i++) {
+      const id = await allTextareas[i].getAttribute('id').catch(() => 'no-id');
+      const name = await allTextareas[i].getAttribute('name').catch(() => 'no-name');
+      console.error(`[typeInEditor] Textarea ${i}: id="${id}", name="${name}"`);
     }
-    
-    await page.keyboard.type(text, { delay: 50 });
-    return;
+    throw new Error('Textarea editor not found on page');
   }
   
-  // Check for CKEditor contenteditable
-  const ckeEditable = page.locator('.cke_editable').first();
-  if (await ckeEditable.count() > 0) {
-    await ckeEditable.click();
+  // Use JavaScript to interact with the textarea directly - more reliable than Playwright's visibility checks
+  await textarea.evaluate((el: HTMLTextAreaElement) => {
+    // Remove any hiding styles
+    el.style.display = 'block';
+    el.style.visibility = 'visible';
+    el.style.opacity = '1';
+    el.style.height = 'auto';
+    el.style.minHeight = '100px';
     
-    if (position === 'beginning') {
-      await page.keyboard.press('Control+Home');
-    } else if (position === 'end') {
-      await page.keyboard.press('Control+End');
-    }
-    
-    await page.keyboard.type(text, { delay: 50 });
-    return;
-  }
-  
-  // Fallback to textarea
-  const textarea = page.locator(
-    'textarea[id*="description"], textarea[id*="notes"], textarea[id*="content"]'
-  ).first();
-  
-  // Try to scroll into view and click, but if that fails, use evaluate
-  try {
-    await textarea.scrollIntoViewIfNeeded();
-    await textarea.click();
-    
-    if (position === 'beginning') {
-      await page.keyboard.press('Control+Home');
-    } else if (position === 'end') {
-      await page.keyboard.press('Control+End');
-    }
-    
-    await page.keyboard.type(text, { delay: 50 });
-  } catch (e) {
-    // If clicking fails (element not visible), use evaluate to append text
-    await textarea.evaluate((el: HTMLTextAreaElement, args: { text: string; position: string }) => {
-      const { text: t, position: pos } = args;
-      if (pos === 'beginning') {
-        el.value = t + el.value;
-        el.setSelectionRange(t.length, t.length);
-      } else if (pos === 'end') {
-        el.value = el.value + t;
-        el.setSelectionRange(el.value.length, el.value.length);
-      } else {
-        el.value = el.value + t;
-        el.setSelectionRange(el.value.length, el.value.length);
+    // Expand any collapsed parent containers
+    let parent = el.parentElement;
+    while (parent && parent !== document.body) {
+      if (parent.style.display === 'none') {
+        parent.style.display = 'block';
       }
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    }, { text, position });
+      if (parent.classList.contains('collapsed')) {
+        parent.classList.remove('collapsed');
+      }
+      // Check for common Redmine collapsible patterns
+      const toggle = parent.querySelector('.toggle, a.toggle');
+      if (toggle && toggle.getAttribute('aria-expanded') === 'false') {
+        toggle.setAttribute('aria-expanded', 'true');
+      }
+      parent = parent.parentElement;
+    }
+    
+    // Scroll into view
+    el.scrollIntoView({ block: 'center', behavior: 'instant' });
+    
+    // Focus
+    el.focus();
+    el.click();
+  });
+  
+  // Wait a bit for focus to be established
+  await page.waitForTimeout(200);
+  
+  // Verify we can interact with it
+  const isFocused = await textarea.evaluate((el: HTMLTextAreaElement) => {
+    return document.activeElement === el;
+  }).catch(() => false);
+  
+  if (!isFocused) {
+    // Try one more time to focus
+    await textarea.focus();
+    await page.waitForTimeout(100);
   }
+  
+  if (position === 'beginning') {
+    await page.keyboard.press('Control+Home');
+  } else if (position === 'end') {
+    await page.keyboard.press('Control+End');
+  }
+  
+  await page.keyboard.type(text, { delay: 50 });
 }
 
 // =============================================================================
@@ -254,63 +244,29 @@ Given('user {string} opens the same wiki page edit in browser B', { timeout: 300
   console.log(`[Collab] Browser B opened wiki page ${this.currentWikiPage} for editing`);
 });
 
-/**
- * Login to Redmine proxy instance if not already logged in
- */
-async function ensureLoggedInProxy(world: ICustomWorld, browser: 'A' | 'B'): Promise<void> {
-  const page = browser === 'A' ? world.pageA! : world.pageB!;
-  const loggedInKey = browser === 'A' ? 'loggedInA' : 'loggedInB';
-  
-  if (world[loggedInKey]) {
-    return;
-  }
-  
-  await page.goto(`${config.BASE_URL_PROXY}/login`);
-  await page.fill('#username', config.admin.login);
-  await page.fill('#password', config.admin.password);
-  await page.click('input[type="submit"][name="login"]');
-  await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 10000 });
-  
-  world[loggedInKey] = true;
-}
-
-/**
- * Navigate to wiki page edit in proxy mode and wait for editor to be ready
- */
-async function openWikiEditProxy(page: Page, projectId: string, pageName: string): Promise<void> {
-  await page.goto(`${config.BASE_URL_PROXY}/projects/${projectId}/wiki/${pageName}/edit`);
-  
-  // Wait for page to load
-  await page.waitForLoadState('domcontentloaded');
-  
-  // Wait for Yjs collaboration to initialize (via ActionCable proxy)
-  await slowExpect(
-    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first()
-  ).toBeVisible({ timeout: 20000 });
-  
-  // Additional wait for WebSocket connection through ActionCable
-  await page.waitForTimeout(1000);
-}
-
 Given('user {string} opens the wiki page edit in browser A using proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
-  await ensureLoggedInProxy(this, 'A');
+  // Set proxy mode flag
+  this.useProxyInstance = true;
+  await ensureLoggedIn(this, 'A');
   
   if (!this.currentProjectId || !this.currentWikiPage) {
     throw new Error('No wiki page context. Make sure "a wiki page exists in proxy mode" step ran first.');
   }
   
-  await openWikiEditProxy(this.pageA!, this.currentProjectId, this.currentWikiPage);
+  await openWikiEdit(this.pageA!, this.currentProjectId, this.currentWikiPage, this);
   console.log(`[Collab] Browser A opened wiki page ${this.currentWikiPage} for editing (proxy mode)`);
 });
 
 Given('user {string} opens the same wiki page edit in browser B using proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
-  await ensureLoggedInProxy(this, 'B');
+  // Set proxy mode flag
+  this.useProxyInstance = true;
+  await ensureLoggedIn(this, 'B');
   
   if (!this.currentProjectId || !this.currentWikiPage) {
     throw new Error('No wiki page context. Make sure "a wiki page exists in proxy mode" step ran first.');
   }
   
-  await openWikiEditProxy(this.pageB!, this.currentProjectId, this.currentWikiPage);
+  await openWikiEdit(this.pageB!, this.currentProjectId, this.currentWikiPage, this);
   console.log(`[Collab] Browser B opened wiki page ${this.currentWikiPage} for editing (proxy mode)`);
 });
 
@@ -394,18 +350,41 @@ When('user sets cursor to position {int} in browser A\'s editor', async function
 });
 
 When('the Hocuspocus connection is interrupted', async function (this: ICustomWorld) {
-  // Block WebSocket connections by intercepting routes
+  // Block WebSocket connections first to prevent reconnection
   await this.pageA!.route('**/*', route => {
     const url = route.request().url();
-    if (url.includes(':8081') || url.includes('/ws')) {
+    if (url.includes(':8081') || url.includes('/ws') || url.includes('/cable')) {
       route.abort();
     } else {
       route.continue();
     }
   });
   
+  // Force disconnect by closing WebSocket connections via JavaScript
+  await this.pageA!.evaluate(() => {
+    // Find all active Yjs providers and disconnect them
+    const win = window as any;
+    if (win.activeCollaborations) {
+      win.activeCollaborations.forEach((collab: any) => {
+        if (collab.provider) {
+          console.log('[Test] Forcing WebSocket disconnect for provider:', collab.documentName);
+          // Disconnect the provider - this should trigger onDisconnect callback
+          if (collab.provider.ws) {
+            collab.provider.ws.close(); // Close WebSocket directly
+          }
+          collab.provider.disconnect(); // Also call disconnect method
+        }
+      });
+    }
+  });
+  
   // Wait for disconnection to be detected
+  // The provider's onDisconnect callback should fire and update the widget
   await this.pageA!.waitForTimeout(2000);
+  
+  // Verify the widget has been updated to disconnected state
+  const statusWidget = this.pageA!.locator('#yjs-collaboration-status, .yjs-collaboration-status-widget').first();
+  await slowExpect(statusWidget).toHaveClass(/disconnected/, { timeout: 10000 });
 });
 
 When('the Hocuspocus connection is restored', async function (this: ICustomWorld) {
@@ -447,40 +426,45 @@ Then('browser A shows {int} other editor(s) connected', async function (this: IC
     // Should show "No other editors" or similar
     await slowExpect(statusWidget).toContainText(/no other editor|connected.*\(.*0\)/i);
   } else {
-    // Wait for awareness to sync - check that badge count stabilizes
+    // Wait for awareness to sync - check that badge count stabilizes at the expected value
     // Awareness updates are debounced, so we need to wait for them to settle
-    let badgeCount = 0;
     let stableCount = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 20; // More attempts to allow awareness to fully sync
+    const requiredStableChecks = 3; // Need 3 consecutive stable checks
     
     for (let i = 0; i < maxAttempts; i++) {
       await this.pageA!.waitForTimeout(1000);
       const userBadges = statusWidget.locator('.yjs-user-badge');
       const currentCount = await userBadges.count();
       
-      if (currentCount === badgeCount) {
+      if (currentCount === count) {
         stableCount++;
-        if (stableCount >= 2) {
-          // Count has been stable for 2 checks, use it
-          badgeCount = currentCount;
-          break;
+        if (stableCount >= requiredStableChecks) {
+          // Count has been stable at expected value for required checks
+          console.log(`[Collab] Browser A: Found ${count} badge(s) (stable for ${stableCount} checks)`);
+          return; // Success!
         }
       } else {
-        badgeCount = currentCount;
-        stableCount = 0;
+        stableCount = 0; // Reset if count doesn't match expected
+        if (i % 5 === 0) {
+          // Log progress every 5 attempts
+          const badgeTexts = await userBadges.allTextContents().catch(() => []);
+          console.log(`[Collab] Browser A: Waiting for ${count} badge(s), currently ${currentCount}:`, badgeTexts);
+        }
       }
     }
     
-    // Debug: log what we found
+    // If we get here, the count never stabilized at the expected value
     const userBadges = statusWidget.locator('.yjs-user-badge');
-    if (badgeCount !== count) {
-      const badgeTexts = await userBadges.allTextContents();
-      console.log(`[Collab] Browser A: Expected ${count} badges, found ${badgeCount}:`, badgeTexts);
-      // Also log the widget HTML for debugging
-      const widgetHtml = await statusWidget.innerHTML().catch(() => '');
-      console.log(`[Collab] Browser A widget HTML:`, widgetHtml.substring(0, 500));
-    }
+    const finalCount = await userBadges.count();
+    const badgeTexts = await userBadges.allTextContents().catch(() => []);
+    const widgetHtml = await statusWidget.innerHTML().catch(() => '');
     
+    console.error(`[Collab] Browser A: Expected ${count} badge(s), but count never stabilized. Final count: ${finalCount}`);
+    console.error(`[Collab] Browser A badge texts:`, badgeTexts);
+    console.error(`[Collab] Browser A widget HTML:`, widgetHtml.substring(0, 1000));
+    
+    // Final assertion - this will fail with a clear error
     await slowExpect(userBadges).toHaveCount(count);
   }
 });
@@ -491,38 +475,44 @@ Then('browser B shows {int} other editor(s) connected', async function (this: IC
   if (count === 0) {
     await slowExpect(statusWidget).toContainText(/no other editor|connected.*\(.*0\)/i);
   } else {
-    // Wait for awareness to sync - check that badge count stabilizes
-    let badgeCount = 0;
+    // Wait for awareness to sync - check that badge count stabilizes at the expected value
     let stableCount = 0;
-    const maxAttempts = 10;
+    const maxAttempts = 20; // More attempts to allow awareness to fully sync
+    const requiredStableChecks = 3; // Need 3 consecutive stable checks
     
     for (let i = 0; i < maxAttempts; i++) {
       await this.pageB!.waitForTimeout(1000);
       const userBadges = statusWidget.locator('.yjs-user-badge');
       const currentCount = await userBadges.count();
       
-      if (currentCount === badgeCount) {
+      if (currentCount === count) {
         stableCount++;
-        if (stableCount >= 2) {
-          // Count has been stable for 2 checks, use it
-          badgeCount = currentCount;
-          break;
+        if (stableCount >= requiredStableChecks) {
+          // Count has been stable at expected value for required checks
+          console.log(`[Collab] Browser B: Found ${count} badge(s) (stable for ${stableCount} checks)`);
+          return; // Success!
         }
       } else {
-        badgeCount = currentCount;
-        stableCount = 0;
+        stableCount = 0; // Reset if count doesn't match expected
+        if (i % 5 === 0) {
+          // Log progress every 5 attempts
+          const badgeTexts = await userBadges.allTextContents().catch(() => []);
+          console.log(`[Collab] Browser B: Waiting for ${count} badge(s), currently ${currentCount}:`, badgeTexts);
+        }
       }
     }
     
-    // Debug: log what we found
+    // If we get here, the count never stabilized at the expected value
     const userBadges = statusWidget.locator('.yjs-user-badge');
-    if (badgeCount !== count) {
-      const badgeTexts = await userBadges.allTextContents();
-      console.log(`[Collab] Browser B: Expected ${count} badges, found ${badgeCount}:`, badgeTexts);
-      const widgetHtml = await statusWidget.innerHTML().catch(() => '');
-      console.log(`[Collab] Browser B widget HTML:`, widgetHtml.substring(0, 500));
-    }
+    const finalCount = await userBadges.count();
+    const badgeTexts = await userBadges.allTextContents().catch(() => []);
+    const widgetHtml = await statusWidget.innerHTML().catch(() => '');
     
+    console.error(`[Collab] Browser B: Expected ${count} badge(s), but count never stabilized. Final count: ${finalCount}`);
+    console.error(`[Collab] Browser B badge texts:`, badgeTexts);
+    console.error(`[Collab] Browser B widget HTML:`, widgetHtml.substring(0, 1000));
+    
+    // Final assertion - this will fail with a clear error
     await slowExpect(userBadges).toHaveCount(count);
   }
 });
@@ -535,18 +525,40 @@ Then('browser A\'s editor shows {string}', async function (this: ICustomWorld, e
 });
 
 Then('browser B shows a cursor at the correct vertical position for browser A', async function (this: ICustomWorld) {
-  // Wait for cursor to appear
-  await this.pageB!.waitForTimeout(1000);
+  // Wait for cursor to appear and sync
+  await this.pageB!.waitForTimeout(2000);
   
   // Find cursor elements (should be visible for remote users)
   const cursorElements = this.pageB!.locator('.yjs-cursor[data-user-id]');
   const cursorCount = await cursorElements.count();
+  
+  if (cursorCount === 0) {
+    // Debug: check if cursor container exists
+    const containerExists = await this.pageB!.locator('.yjs-cursor-container').count();
+    console.log(`[Collab] Cursor count: ${cursorCount}, container exists: ${containerExists}`);
+    
+    // Check if collaboration is active
+    const widgetExists = await this.pageB!.locator('#yjs-collaboration-status').count();
+    console.log(`[Collab] Widget exists: ${widgetExists}`);
+  }
   
   expect(cursorCount).toBeGreaterThan(0);
   
   // Check that cursor is visible (not display: none)
   const firstCursor = cursorElements.first();
   const isVisible = await firstCursor.isVisible();
+  
+  if (!isVisible) {
+    // Debug: check computed styles
+    const display = await firstCursor.evaluate((el: HTMLElement) => {
+      return window.getComputedStyle(el).display;
+    });
+    const opacity = await firstCursor.evaluate((el: HTMLElement) => {
+      return window.getComputedStyle(el).opacity;
+    });
+    console.log(`[Collab] Cursor not visible - display: ${display}, opacity: ${opacity}`);
+  }
+  
   expect(isVisible).toBe(true);
   
   // Verify cursor has a valid position (top and left are set)
@@ -560,6 +572,10 @@ Then('browser B shows a cursor at the correct vertical position for browser A', 
   // Top should be a valid CSS value (not 'auto' or '0px' if content exists)
   expect(top).not.toBe('auto');
   expect(left).not.toBe('auto');
+  
+  // Top should be a positive number (cursor should be positioned)
+  const topNum = parseFloat(top);
+  expect(topNum).toBeGreaterThanOrEqual(0);
   
   console.log(`[Collab] Cursor position verified: top=${top}, left=${left}`);
 });

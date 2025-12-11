@@ -13,9 +13,6 @@ const slowExpect = expect.configure({ timeout: 15000 });
  * Get the base URL based on world configuration
  */
 function getBaseUrl(world: ICustomWorld): string {
-  if (world.usePlaintextInstance) {
-    return config.BASE_URL_PLAINTEXT;
-  }
   if (world.useProxyInstance) {
     return config.BASE_URL_PROXY;
   }
@@ -67,19 +64,20 @@ Given('Redmine is running with Yjs collaborative editing enabled', async functio
   console.log('[Setup] ✅ Redmine is running');
 });
 
-Given('Redmine is configured with plain text editor', async function (this: ICustomWorld) {
-  // Switch to plaintext instance for subsequent steps
-  // This will be used by the "opens the issue" steps
-  this.usePlaintextInstance = true;
-  console.log('[Setup] ✅ Using plain text editor instance');
-});
-
 Given('Redmine is running with Yjs collaborative editing enabled in proxy mode', async function (this: ICustomWorld) {
+  // Switch to proxy instance for subsequent steps
+  this.useProxyInstance = true;
   // Health check already done in BeforeAll hook
   // Just verify we can reach the home page
   await this.pageA!.goto(config.BASE_URL_PROXY);
   await slowExpect(this.pageA!.locator('body')).toBeVisible();
   console.log('[Setup] ✅ Redmine proxy mode is running');
+});
+
+Given('Redmine is configured with plain text editor', async function (this: ICustomWorld) {
+  // All instances are now configured for plain text (no CKEditor)
+  // This step is a no-op but kept for feature file compatibility
+  console.log('[Setup] ✅ Using plain text editor (default configuration)');
 });
 
 Given('a test project {string} exists', { timeout: 30000 }, async function (this: ICustomWorld, projectName: string) {

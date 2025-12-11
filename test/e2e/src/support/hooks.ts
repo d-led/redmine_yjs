@@ -133,9 +133,8 @@ async function waitForRedmineReady(baseUrl: string, maxRetries = 60, intervalMs 
 // plus Hocuspocus check and browser launch. Use 5 minutes to be safe.
 BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
   console.log('[Hooks] BeforeAll: Starting test suite');
-  console.log(`[Hooks] Redmine URL (CKEditor, direct): ${config.BASE_URL}`);
-  console.log(`[Hooks] Redmine URL (CKEditor, proxy): ${config.BASE_URL_PROXY}`);
-  console.log(`[Hooks] Redmine URL (plain text): ${config.BASE_URL_PLAINTEXT}`);
+  console.log(`[Hooks] Redmine URL (direct): ${config.BASE_URL}`);
+  console.log(`[Hooks] Redmine URL (proxy): ${config.BASE_URL_PROXY}`);
   console.log(`[Hooks] Hocuspocus URL: ${config.HOCUSPOCUS_URL}`);
   
   // Wait for Hocuspocus to be available (quick startup)
@@ -145,8 +144,8 @@ BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
     throw new Error(`Hocuspocus not available at ${config.HOCUSPOCUS_URL}/health. Check docker-compose.test.yml`);
   }
   
-  // Wait for all Redmine instances to be FULLY ready (Rails + DB + migrations complete)
-  console.log('[Hooks] Checking Redmine (CKEditor, direct mode)...');
+  // Wait for Redmine instances to be FULLY ready (Rails + DB + migrations complete)
+  console.log('[Hooks] Checking Redmine (direct mode)...');
   const redmineReady = await waitForRedmineReady(config.BASE_URL, 90, 3000);
   if (!redmineReady) {
     throw new Error(
@@ -155,26 +154,13 @@ BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
     );
   }
   
-  console.log('[Hooks] Checking Redmine (CKEditor, proxy mode)...');
+  console.log('[Hooks] Checking Redmine (proxy mode)...');
   const redmineProxyReady = await waitForRedmineReady(config.BASE_URL_PROXY, 90, 3000);
   if (!redmineProxyReady) {
     throw new Error(
       `Redmine proxy not fully ready at ${config.BASE_URL_PROXY}. ` +
       `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml logs redmine-proxy`
     );
-  }
-  
-  // Plaintext instance is optional - only check if container exists
-  // Tests that require it will fail later if it's not available
-  console.log('[Hooks] Checking Redmine (plain text editor)...');
-  const redminePlaintextReady = await waitForRedmineReady(config.BASE_URL_PLAINTEXT, 30, 3000);
-  if (!redminePlaintextReady) {
-    console.warn(
-      `[Hooks] ⚠️ Redmine plaintext not ready at ${config.BASE_URL_PLAINTEXT}. ` +
-      `Tests requiring @plaintext tag will fail. ` +
-      `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml up -d redmine-plaintext`
-    );
-    // Don't throw - allow tests that don't need plaintext to continue
   }
   
   // Launch shared browser

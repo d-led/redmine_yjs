@@ -3,12 +3,6 @@ set -e
 
 cd /usr/src/redmine
 
-# Disable CKEditor's Gemfile BEFORE any bundle operations (if CKEditor is installed)
-# This prevents bundler from trying to resolve git sources at runtime
-if [ -f "plugins/redmine_ckeditor/Gemfile" ]; then
-  mv plugins/redmine_ckeditor/Gemfile plugins/redmine_ckeditor/Gemfile.disabled 2>/dev/null || true
-fi
-
 # Create SQLite database config
 if [ "${REDMINE_DB_SQLITE}" = "true" ]; then
   mkdir -p /data/db
@@ -35,29 +29,6 @@ fi
 # Set admin password
 if [ -n "${REDMINE_ADMIN_PASSWORD}" ]; then
   bundle exec rails runner "u=User.find_by_login('admin'); u.password=u.password_confirmation='${REDMINE_ADMIN_PASSWORD}'; u.must_change_passwd=false; u.save!" RAILS_ENV=production 2>/dev/null || true
-fi
-
-# Configure CKEditor if plugin is installed
-if [ -d "plugins/redmine_ckeditor" ]; then
-  echo "Configuring CKEditor plugin..."
-  bundle exec rails runner "
-    # Set text formatting to CKEditor
-    Setting.text_formatting = 'CKEditor' unless Setting.text_formatting == 'CKEditor'
-    
-    # Configure CKEditor plugin settings if not already set
-    if Setting.find_by(name: 'plugin_redmine_ckeditor').nil?
-      Setting.plugin_redmine_ckeditor = {
-        'skin' => 'moono-lisa',
-        'ui_color' => '#f4f4f4',
-        'height' => '400',
-        'enter_mode' => '1',
-        'show_blocks' => '1',
-        'toolbar_can_collapse' => '1',
-        'toolbar_location' => 'top'
-      }
-      puts '[Test Setup] CKEditor plugin configured'
-    end
-  " RAILS_ENV=production 2>/dev/null || echo "Warning: Could not configure CKEditor"
 fi
 
 # Configure Yjs plugin WebSocket proxy mode if HOCUSPOCUS_INTERNAL_URL is set

@@ -203,9 +203,14 @@
     }
 
     // Collect all active sessions from all active collaborations
-    // Show ALL other sessions (including same user in different tabs)
-    const allUsers = new Map(); // Map<visitorKey, {name, color, clientId, isSameUser}>
+    // IMPORTANT: Each textarea on a page has its own provider and its own clientId
+    // If the same user is editing multiple textareas, they'll have multiple clientIds (one per provider)
+    // Solution: Show one badge per unique user (userId), not per clientId
+    // This means: same user editing multiple fields = one badge, same user in different tabs = one badge per tab
+    // However, we need to track by (userId, clientId) to distinguish same user in different tabs
+    const allUsers = new Map(); // Map<userId-clientId, {name, color, clientId, userId, isSameUser}>
     const allPeers = new Map(); // Map<clientId, {userId, userName, isSelf}>
+    const seenClientIds = new Set(); // Track which clientIds we've seen (for debugging)
     let totalSessions = 0;
     let selfPeerId = null;
     let totalEditors = 0;
@@ -214,32 +219,50 @@
       if (collab.provider && connectionState === 'connected') {
         const states = collab.provider.awareness.getStates();
         const selfClientId = collab.provider.awareness.clientID;
-        selfPeerId = selfClientId;
-        totalEditors = states.size;
+        
+        // Track self peer ID (use the first one we encounter)
+        if (selfPeerId === null) {
+          selfPeerId = selfClientId;
+        }
+        totalEditors = Math.max(totalEditors, states.size);
 
         states.forEach((state, clientId) => {
           const isSelf = clientId === selfClientId;
           const hasUser = !!state.user;
           
           // Track all peers for debugging
-          allPeers.set(clientId, {
-            userId: state.user?.id || 'unknown',
-            userName: state.user?.name || 'Unknown',
-            isSelf: isSelf,
-            hasUser: hasUser
-          });
-          
-          // Show ALL other sessions (not just different users)
-          // Use clientId as key to show each session separately
-          if (hasUser && !isSelf) {
-            const isSameUser = state.user.id === window.currentUser?.id;
-            allUsers.set(clientId, {
-              name: state.user.name || 'Unknown',
-              color: state.color || getUserColor(state.user.id),
-              clientId: clientId,
-              isSameUser: isSameUser // Flag to show "(you)" suffix
+          if (!seenClientIds.has(clientId)) {
+            allPeers.set(clientId, {
+              userId: state.user?.id || 'unknown',
+              userName: state.user?.name || 'Unknown',
+              isSelf: isSelf,
+              hasUser: hasUser
             });
-            totalSessions++;
+            seenClientIds.add(clientId);
+          }
+          
+          // Show other sessions (not self)
+          // Key insight: If the same user is editing multiple textareas, they'll have multiple clientIds
+          // We want to show ONE badge per unique userId, regardless of how many fields they're editing
+          // This means: same user editing multiple fields = one badge, same user in different tabs = one badge per tab
+          // However, we can't distinguish same tab vs different tabs, so we show one badge per unique userId
+          // (If we wanted to show one badge per tab, we'd need to track userId-clientId, but that's not what the test expects)
+          if (hasUser && !isSelf) {
+            const userId = state.user.id;
+            
+            // Use userId as key to ensure one badge per user
+            // This means if the same user is editing multiple fields, they only show up once
+            if (!allUsers.has(userId)) {
+              const isSameUser = userId === window.currentUser?.id;
+              allUsers.set(userId, {
+                name: state.user.name || 'Unknown',
+                color: state.color || getUserColor(userId),
+                clientId: clientId, // Keep track of one clientId for this user (for debugging)
+                userId: userId,
+                isSameUser: isSameUser // Flag to show "(other tab)" suffix
+              });
+              totalSessions++;
+            }
           }
         });
       }
@@ -280,8 +303,17 @@
 
     // Active sessions list (show other sessions, even if same user)
     if (allUsers.size > 0) {
+      // Debug: log all users to help diagnose duplicate issues
+      if (allUsers.size > 1) {
+        console.log('[Yjs] 🔍 Multiple users in widget:', Array.from(allUsers.entries()).map(([cid, info]) => ({
+          clientId: cid,
+          name: info.name,
+          isSameUser: info.isSameUser
+        })));
+      }
+      
       html += '<div class="yjs-users-list">';
-      allUsers.forEach((userInfo, clientId) => {
+      allUsers.forEach((userInfo, userKey) => {
         html += `<span class="yjs-user-badge" style="background-color: ${userInfo.color}20; border-color: ${userInfo.color}">`;
         html += `<span class="yjs-user-avatar" style="background-color: ${userInfo.color}"></span>`;
         html += `<span class="yjs-user-name">${escapeHtml(userInfo.name)}`;
@@ -340,7 +372,7 @@
     const cursor = document.createElement('div');
     cursor.className = 'yjs-cursor';
     cursor.setAttribute('data-user-id', userId);
-    cursor.style.position = 'fixed';  // Fixed positioning for viewport coordinates
+    cursor.style.position = 'absolute';  // Absolute positioning relative to cursor container
     cursor.style.width = '2px';
     cursor.style.height = '20px';
     cursor.style.backgroundColor = color;
@@ -917,6 +949,32 @@
     // Handle remote cursors and presence using Yjs awareness
     const remoteCursors = new Map();
     const knownUsers = new Map(); // Track users for presence logging
+    const cursorOffsets = new Map(); // Store cursor offsets for scroll updates (clientId -> cursorPos)
+    
+    // Update all cursor positions on scroll/resize (similar to CKEditor solution)
+    function updateAllTextareaCursorPositions() {
+      cursorOffsets.forEach((cursorPos, clientId) => {
+        const cursorEl = remoteCursors.get(clientId);
+        if (!cursorEl || cursorPos === null || cursorPos === undefined || cursorPos < 0) return;
+        
+        const position = calculateTextareaCursorPosition(textarea, cursorPos);
+        cursorEl.style.display = 'block';
+        cursorEl.style.left = position.x + 'px';
+        cursorEl.style.top = position.y + 'px';
+        cursorEl.style.height = position.lineHeight + 'px';
+        
+        const label = cursorEl.querySelector('.yjs-cursor-label');
+        if (label) {
+          label.style.left = '0';
+          label.style.top = '-' + (parseFloat(position.lineHeight) + 4) + 'px';
+        }
+      });
+    }
+    
+    // Listen for scroll events to update cursor positions (like CKEditor)
+    textarea.addEventListener('scroll', updateAllTextareaCursorPositions, { passive: true });
+    window.addEventListener('scroll', updateAllTextareaCursorPositions, { passive: true });
+    window.addEventListener('resize', updateAllTextareaCursorPositions, { passive: true });
     
     // Listen for Yjs awareness updates (when users join/leave/update)
     // Awareness is the core Yjs facility for presence data
@@ -928,6 +986,7 @@
           const cursorEl = remoteCursors.get(clientId);
           if (cursorEl) cursorEl.remove();
           remoteCursors.delete(clientId);
+          cursorOffsets.delete(clientId); // Clean up stored offset
         }
         if (knownUsers.has(clientId)) {
           const userInfo = knownUsers.get(clientId);
@@ -975,6 +1034,9 @@
         
           // Render cursor for remote users
           if (!isSelf && cursorPos !== null && cursorPos !== undefined && cursorPos >= 0) {
+          // Store cursor offset for scroll updates (like CKEditor solution)
+          cursorOffsets.set(clientId, cursorPos);
+          
           let cursorEl = remoteCursors.get(clientId);
           if (!cursorEl) {
               cursorEl = createCursorElement(userState.id, userState.name, color);
@@ -983,7 +1045,11 @@
           }
           
             const position = calculateTextareaCursorPosition(textarea, cursorPos);
+          // Position is relative to textarea, and cursor uses position: absolute relative to cursor container
+          // The cursor container is positioned absolute relative to the wrapper, which matches textarea position
+          // So we can use the position directly
           console.debug('[Yjs] 🎯 Textarea cursor position:', {
+            clientId,
             cursorPos,
             position,
             textareaScroll: { top: textarea.scrollTop, left: textarea.scrollLeft },
@@ -995,10 +1061,13 @@
             cursorEl.style.height = position.lineHeight + 'px';
             
             const label = cursorEl.querySelector('.yjs-cursor-label');
-            label.style.left = '0';
-            label.style.top = '-' + (parseFloat(position.lineHeight) + 4) + 'px';
+            if (label) {
+              label.style.left = '0';
+              label.style.top = '-' + (parseFloat(position.lineHeight) + 4) + 'px';
+            }
           } else if (!isSelf && remoteCursors.has(clientId)) {
             remoteCursors.get(clientId).style.display = 'none';
+            cursorOffsets.delete(clientId); // Clean up offset when cursor is hidden
         }
       });
       

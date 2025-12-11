@@ -14,6 +14,28 @@
 #
 set -e
 
+# Track child process PIDs for cleanup
+CHILD_PIDS=()
+
+# Function to kill all child processes
+kill_children() {
+  if [ ${#CHILD_PIDS[@]} -gt 0 ]; then
+    log_warning "Killing child processes..."
+    for pid in "${CHILD_PIDS[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -TERM "$pid" 2>/dev/null || true
+      fi
+    done
+    # Wait a bit, then force kill if still running
+    sleep 1
+    for pid in "${CHILD_PIDS[@]}"; do
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+    done
+  fi
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 E2E_DIR="$PLUGIN_DIR/test/e2e"
@@ -375,12 +397,21 @@ run_e2e_tests() {
   
   # Run tests (npm test will use npx via test-runner.sh)
   log_info "Running E2E tests..."
-  if $TEST_CMD; then
+  log_info "Press Ctrl-C to stop (will cleanup Docker services)"
+  
+  # Run the test command - signals should be forwarded to it
+  # Use 'set +e' temporarily so we can capture exit code
+  set +e
+  $TEST_CMD
+  TEST_EXIT_CODE=$?
+  set -e
+  
+  if [ $TEST_EXIT_CODE -eq 0 ]; then
     log_success "E2E tests passed"
     return 0
   else
-    log_error "E2E tests failed"
-    return 1
+    log_error "E2E tests failed (exit code: $TEST_EXIT_CODE)"
+    return $TEST_EXIT_CODE
   fi
 }
 
@@ -463,6 +494,9 @@ DOCKER_STARTED=false
 
 # Cleanup function that checks if we should cleanup
 safe_cleanup() {
+  # Kill any child processes first
+  kill_children
+  
   # Only cleanup if we started the services and not in cleanup-only mode
   if [ "$DOCKER_STARTED" = true ] && [ "$CLEANUP_ONLY" = false ]; then
     cleanup_docker
@@ -470,7 +504,20 @@ safe_cleanup() {
 }
 
 # Trap to ensure cleanup on exit (but only if we started services)
-trap safe_cleanup EXIT INT TERM
+# Use a separate handler for INT/TERM that exits after cleanup
+handle_interrupt() {
+  echo ""
+  log_warning "Interrupted by user (Ctrl-C)"
+  # Kill any child processes (like npm/cucumber-js)
+  kill_children
+  # Cleanup Docker
+  safe_cleanup
+  exit 130  # Standard exit code for SIGINT
+}
+
+# Set up traps - EXIT runs on normal exit, INT/TERM on Ctrl-C/kill
+trap safe_cleanup EXIT
+trap handle_interrupt INT TERM
 
 # Run main function
 main

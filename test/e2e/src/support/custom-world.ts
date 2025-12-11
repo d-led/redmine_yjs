@@ -51,8 +51,6 @@ export interface ICustomWorld extends World {
   loggedInA?: boolean;
   loggedInB?: boolean;
   
-  /** Use plaintext instance instead of CKEditor */
-  usePlaintextInstance?: boolean;
   /** Use proxy instance instead of direct */
   useProxyInstance?: boolean;
 }
@@ -69,7 +67,6 @@ export class CustomWorld extends World implements ICustomWorld {
   currentWikiPage?: string;
   loggedInA?: boolean;
   loggedInB?: boolean;
-  usePlaintextInstance?: boolean;
   useProxyInstance?: boolean;
 
   constructor(options: IWorldOptions) {
