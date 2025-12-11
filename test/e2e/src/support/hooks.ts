@@ -86,7 +86,9 @@ async function waitForRedmineReady(baseUrl: string, maxRetries = 60, intervalMs 
   return false;
 }
 
-BeforeAll(async function () {
+// Timeout for BeforeAll: must accommodate Redmine startup (up to 90 retries * 3s = 270s)
+// plus Hocuspocus check and browser launch. Use 5 minutes to be safe.
+BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
   console.log('[Hooks] BeforeAll: Starting test suite');
   console.log(`[Hooks] Redmine URL: ${config.BASE_URL}`);
   console.log(`[Hooks] Hocuspocus URL: ${config.HOCUSPOCUS_URL}`);
