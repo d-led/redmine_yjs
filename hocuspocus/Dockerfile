@@ -1,9 +1,13 @@
-FROM node:20-alpine
+FROM node:20-slim
 
 WORKDIR /app
 
 # Install dependencies for building native modules (if needed)
-RUN apk add --no-cache python3 make g++
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package files
 COPY package.json package-lock.json* ./
@@ -15,8 +19,8 @@ RUN npm ci --only=production
 COPY . .
 
 # Create non-root user
-RUN addgroup -g 1001 nodeuser && \
-    adduser -D -u 1001 -G nodeuser nodeuser && \
+RUN groupadd -g 1001 nodeuser && \
+    useradd -u 1001 -g nodeuser -m nodeuser && \
     chown -R nodeuser:nodeuser /app
 
 USER nodeuser
