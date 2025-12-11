@@ -74,7 +74,7 @@ services:
   redmine-plaintext:
     build:
       context: ../..  # Plugin root directory
-      dockerfile: test/e2e/Dockerfile.redmine
+      dockerfile: test/e2e/Dockerfile.redmine-plaintext
     container_name: redmine_yjs_test_app_plaintext
     depends_on:
       hocuspocus:

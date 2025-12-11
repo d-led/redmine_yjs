@@ -4,10 +4,12 @@ ARG REDMINE_TAG=6.0
 
 FROM redmine:${REDMINE_TAG}
 
-# Install SQLite, curl, git for health checks and plugin installation
+# Install build tools for native extensions and other dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     sqlite3 \
     libsqlite3-dev \
+    libyaml-dev \
     curl \
     git \
     && rm -rf /var/lib/apt/lists/*
@@ -32,8 +34,25 @@ RUN mkdir -p /usr/src/redmine/public/plugin_assets/redmine_yjs \
 # Add websocket-client-simple gem for ActionCable proxy mode
 RUN echo "gem 'websocket-client-simple', '~> 0.3.0', require: false" >> Gemfile || true
 
-# Install gems for plugins (CKEditor and websocket-client-simple)
-RUN bundle install --without development test || true
+# Create temporary database.yml so sqlite3 gem gets installed during bundle install
+# (Redmine's Gemfile installs sqlite3 conditionally based on database.yml)
+RUN mkdir -p config && \
+    echo "production:" > config/database.yml && \
+    echo "  adapter: sqlite3" >> config/database.yml && \
+    echo "  database: /tmp/redmine.sqlite3" >> config/database.yml
+
+# Install gems for plugins
+# CKEditor's Gemfile may have dependencies that conflict, so we disable it
+# CKEditor will still work without its optional Gemfile dependencies
+RUN if [ -f "plugins/redmine_ckeditor/Gemfile" ]; then \
+      mv plugins/redmine_ckeditor/Gemfile plugins/redmine_ckeditor/Gemfile.disabled || true; \
+    fi && \
+    bundle config set --local without 'development test' && \
+    bundle config set --local path '/usr/local/bundle' && \
+    bundle install --jobs 4 --retry 3
+
+# Remove temporary database.yml (entrypoint will create the real one)
+RUN rm -f config/database.yml
 
 # Copy ActionCable config for WebSocket proxy mode
 COPY test/e2e/cable.yml /usr/src/redmine/config/cable.yml

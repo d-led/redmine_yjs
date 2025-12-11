@@ -164,13 +164,17 @@ BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
     );
   }
   
+  // Plaintext instance is optional - only check if container exists
+  // Tests that require it will fail later if it's not available
   console.log('[Hooks] Checking Redmine (plain text editor)...');
-  const redminePlaintextReady = await waitForRedmineReady(config.BASE_URL_PLAINTEXT, 90, 3000);
+  const redminePlaintextReady = await waitForRedmineReady(config.BASE_URL_PLAINTEXT, 30, 3000);
   if (!redminePlaintextReady) {
-    throw new Error(
-      `Redmine plaintext not fully ready at ${config.BASE_URL_PLAINTEXT}. ` +
-      `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml logs redmine-plaintext`
+    console.warn(
+      `[Hooks] ⚠️ Redmine plaintext not ready at ${config.BASE_URL_PLAINTEXT}. ` +
+      `Tests requiring @plaintext tag will fail. ` +
+      `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml up -d redmine-plaintext`
     );
+    // Don't throw - allow tests that don't need plaintext to continue
   }
   
   // Launch shared browser

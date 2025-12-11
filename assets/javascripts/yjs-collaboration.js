@@ -25,16 +25,34 @@
   console.log('[Yjs] User available:', typeof window.currentUser !== 'undefined', window.currentUser);
 
   // Early exit: Only enable collaboration on edit pages
-  const isEditPage = window.location.pathname.includes('/edit') || 
-                     window.location.search.includes('edit=true') ||
-                     document.querySelector('form textarea[id*="content"], form textarea[id*="description"], form textarea[id*="notes"]');
+  // Check multiple conditions (be lenient - collaboration should work on any edit form):
+  // 1. URL path contains /edit (e.g., /issues/1/edit, /wiki/Page/edit)
+  // 2. Query string has edit=true
+  // 3. Form contains textareas for content/description/notes (even if replaced by CKEditor)
+  // 4. CKEditor instances exist (CKEditor replaces textareas but we still want collaboration)
+  // 5. Issue edit form detected (has issue form with description/notes fields)
+  // 6. Wiki edit form detected
+  const pathHasEdit = window.location.pathname.includes('/edit');
+  const queryHasEdit = window.location.search.includes('edit=true');
+  const hasTextarea = document.querySelector('form textarea[id*="content"], form textarea[id*="description"], form textarea[id*="notes"], textarea#issue_description, textarea#issue_notes, textarea#content_text');
+  const hasIssueForm = document.querySelector('form#issue-form, form[action*="/issues"], form input[name="issue[subject]"]');
+  const hasWikiForm = document.querySelector('form#wiki_form, form[action*="/wiki"]');
+  const hasCKEditor = typeof window.CKEDITOR !== 'undefined' && 
+                      (document.querySelector('.cke_editable') || 
+                       document.querySelector('iframe.cke_wysiwyg_frame') ||
+                       document.querySelector('[id*="description"][class*="cke"], [id*="notes"][class*="cke"], [id*="content"][class*="cke"]'));
+  
+  const isEditPage = pathHasEdit || queryHasEdit || hasTextarea || hasIssueForm || hasWikiForm || hasCKEditor;
   
   if (!isEditPage) {
     console.log('[Yjs] Not an edit page, skipping collaboration initialization');
+    console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor);
+    console.log('[Yjs] Debug - pathname:', window.location.pathname, 'search:', window.location.search);
     return;
   }
   
   console.log('[Yjs] Edit page detected, initializing collaboration');
+  console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor);
 
   // Check for libraries immediately - fail fast if not available
   // CDN scripts load synchronously before this script runs

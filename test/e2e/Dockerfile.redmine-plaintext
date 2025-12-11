@@ -1,5 +1,6 @@
-# Test Redmine image with redmine_yjs plugin pre-installed
+# Test Redmine image with redmine_yjs plugin pre-installed (plaintext editor only)
 # Based on official Redmine image
+# This version does NOT install CKEditor plugin - for plaintext editor testing
 ARG REDMINE_TAG=6.0
 
 FROM redmine:${REDMINE_TAG}
@@ -16,15 +17,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /usr/src/redmine
 
-# Install CKEditor plugin for testing (if not already present)
-# CKEditor is needed for some E2E tests
-RUN if [ ! -d "plugins/redmine_ckeditor" ]; then \
-      echo "Installing CKEditor plugin..."; \
-      git clone --depth 1 --branch master https://github.com/a-ono/redmine_ckeditor.git plugins/redmine_ckeditor || \
-      git clone --depth 1 https://github.com/a-ono/redmine_ckeditor.git plugins/redmine_ckeditor || \
-      echo "Warning: Could not install CKEditor plugin"; \
-    fi
-
 # Copy the plugin (context is plugin root)
 COPY . /usr/src/redmine/plugins/redmine_yjs/
 
@@ -32,7 +24,7 @@ COPY . /usr/src/redmine/plugins/redmine_yjs/
 RUN mkdir -p /usr/src/redmine/public/plugin_assets/redmine_yjs \
     && cp -r /usr/src/redmine/plugins/redmine_yjs/assets/* /usr/src/redmine/public/plugin_assets/redmine_yjs/ 2>/dev/null || true
 
-# Add websocket-client-simple gem for ActionCable proxy mode
+# Add websocket-client-simple gem for ActionCable proxy mode (if needed)
 RUN echo "gem 'websocket-client-simple', '~> 0.3.0', require: false" >> Gemfile || true
 
 # Create temporary database.yml so sqlite3 gem gets installed during bundle install
@@ -42,13 +34,8 @@ RUN mkdir -p config && \
     echo "  adapter: sqlite3" >> config/database.yml && \
     echo "  database: /tmp/redmine.sqlite3" >> config/database.yml
 
-# Install gems for plugins
-# CKEditor's Gemfile may have dependencies that conflict, so we disable it
-# CKEditor will still work without its optional Gemfile dependencies
-RUN if [ -f "plugins/redmine_ckeditor/Gemfile" ]; then \
-      mv plugins/redmine_ckeditor/Gemfile plugins/redmine_ckeditor/Gemfile.disabled || true; \
-    fi && \
-    bundle config set --local without 'development test' && \
+# Install gems for plugins (no CKEditor, so no conflicts)
+RUN bundle config set --local without 'development test' && \
     bundle config set --local path '/usr/local/bundle' && \
     bundle install --jobs 4 --retry 3
 
@@ -65,3 +52,4 @@ RUN chmod +x /usr/local/bin/test-entrypoint.sh
 EXPOSE 3000
 
 ENTRYPOINT ["/usr/local/bin/test-entrypoint.sh"]
+

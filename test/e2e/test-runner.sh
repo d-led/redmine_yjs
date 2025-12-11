@@ -7,9 +7,9 @@ set -e
 # Maximum test duration (10 minutes)
 MAX_DURATION=${TEST_TIMEOUT:-600}
 
-# Run cucumber with timeout
+# Run cucumber with timeout (using npx to avoid requiring global installation)
 EXIT_CODE=0
-timeout ${MAX_DURATION} npx cucumber-js "$@" || EXIT_CODE=$?
+timeout ${MAX_DURATION} npx --yes cucumber-js "$@" || EXIT_CODE=$?
 
 # If timeout occurred, exit with 124 (standard timeout exit code)
 if [ "${EXIT_CODE}" -eq 124 ]; then

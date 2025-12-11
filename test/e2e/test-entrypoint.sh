@@ -3,6 +3,12 @@ set -e
 
 cd /usr/src/redmine
 
+# Disable CKEditor's Gemfile BEFORE any bundle operations (if CKEditor is installed)
+# This prevents bundler from trying to resolve git sources at runtime
+if [ -f "plugins/redmine_ckeditor/Gemfile" ]; then
+  mv plugins/redmine_ckeditor/Gemfile plugins/redmine_ckeditor/Gemfile.disabled 2>/dev/null || true
+fi
+
 # Create SQLite database config
 if [ "${REDMINE_DB_SQLITE}" = "true" ]; then
   mkdir -p /data/db
@@ -13,6 +19,9 @@ production:
   timeout: 5000
 DBCONF
 fi
+
+# Ensure bundle is set up (in case some dependencies failed during build)
+bundle config set --local without 'development test' || true
 
 # Run migrations
 bundle exec rake db:migrate RAILS_ENV=production 2>/dev/null || bundle exec rake db:migrate RAILS_ENV=production
