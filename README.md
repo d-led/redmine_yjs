@@ -50,14 +50,31 @@ bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 
 The plugin includes a Hocuspocus WebSocket server in the `hocuspocus/` directory.
 
-#### Option A: Docker Compose (Recommended)
+#### Option A: Use Published Docker Image (Recommended)
+
+```bash
+docker run -p 8081:8081 ghcr.io/d-led/redmine_yjs-hocuspocus:latest
+```
+
+Or in Docker Compose:
+
+```yaml
+services:
+  hocuspocus:
+    image: ghcr.io/d-led/redmine_yjs-hocuspocus:latest
+    ports:
+      - "8081:8081"
+```
+
+#### Option B: Build Locally
 
 ```bash
 cd redmine_yjs/hocuspocus
-docker-compose up -d
+docker build -t hocuspocus .
+docker run -p 8081:8081 hocuspocus
 ```
 
-#### Option B: Standalone Node.js
+#### Option C: Standalone Node.js
 
 ```bash
 cd redmine_yjs/hocuspocus
@@ -65,7 +82,7 @@ npm install
 npm start
 ```
 
-#### Option C: Deploy to Fly.io
+#### Option D: Deploy to Fly.io
 
 ```bash
 cd redmine_yjs/hocuspocus

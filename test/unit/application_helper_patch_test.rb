@@ -3,18 +3,22 @@
 require File.expand_path('../test_helper', __dir__)
 
 class ApplicationHelperPatchTest < ActiveSupport::TestCase
-  include ApplicationHelper
+  include RedmineYjs::ApplicationHelperPatch
 
-  def test_yjs_assets_helper_defined
-    assert respond_to?(:yjs_assets)
+  def test_hocuspocus_url_helper_defined
+    assert respond_to?(:hocuspocus_url)
   end
 
   def test_yjs_enabled_helper_defined
     assert respond_to?(:yjs_enabled?)
   end
 
-  def test_yjs_document_context_helper_defined
-    assert respond_to?(:yjs_document_context)
+  def test_yjs_document_name_helper_defined
+    assert respond_to?(:yjs_document_name)
+  end
+
+  def test_yjs_document_name_format
+    name = yjs_document_name(1, 'issue', 42)
+    assert_equal 'project-1-issue-42', name
   end
 end
-
