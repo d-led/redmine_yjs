@@ -5,15 +5,12 @@ ARG REDMINE_TAG=6.0
 FROM redmine:${REDMINE_TAG}
 
 # Install SQLite and curl for health checks
+# Note: sqlite3 gem is already included in Redmine 6.0
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlite3 \
     libsqlite3-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
-
-# Install sqlite3 gem
-RUN echo "gem 'sqlite3', '~> 1.7'" >> /usr/src/redmine/Gemfile \
-    && bundle install --without development test
 
 WORKDIR /usr/src/redmine
 
