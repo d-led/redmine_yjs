@@ -264,7 +264,8 @@ labels:
 When Hocuspocus is on a different origin than Redmine, browsers block WebSocket connections. Solutions:
 
 1. **Same-origin proxy** (recommended) - Route through Traefik/nginx as shown above
-2. **Direct connection** - Only works if both use the same domain
+2. **ActionCable proxy** - Enable in plugin settings to route through Redmine
+3. **Direct connection** - Only works if both use the same domain
 
 The Redmine plugin auto-detects the WebSocket URL:
 - With proxy: `ws://redmine.example.com/ws` (same origin, no CORS)
@@ -282,6 +283,187 @@ labels:
 ```
 
 Client URL becomes: `wss://redmine.example.com/ws/document-name`
+
+### OAuth2 Proxy (oauth2-proxy)
+
+For enterprise SSO (Azure AD, Google, Okta, etc.), use [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) in front of both Redmine and Hocuspocus:
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────┐
+│   Browser   │────▶│ oauth2-proxy │────▶│ Redmine │
+└─────────────┘     │              │     └─────────┘
+                    │   (SSO)      │     ┌───────────┐
+                    │              │────▶│ Hocuspocus│
+                    └──────────────┘     └───────────┘
+```
+
+#### Docker Compose with oauth2-proxy
+
+```yaml
+services:
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.5.1
+    command:
+      - --http-address=0.0.0.0:4180
+      - --upstream=http://redmine:3000
+      - --upstream=http://hocuspocus:8081/ws
+      # Azure AD example
+      - --provider=azure
+      - --client-id=${OAUTH_CLIENT_ID}
+      - --client-secret=${OAUTH_CLIENT_SECRET}
+      - --azure-tenant=${OAUTH_TENANT_ID}
+      # Pass user info to upstreams
+      - --set-xauthrequest=true
+      - --pass-access-token=true
+      - --pass-user-headers=true
+      # Cookie settings
+      - --cookie-secret=${COOKIE_SECRET}  # Generate: openssl rand -base64 32
+      - --cookie-secure=true
+      - --cookie-name=_oauth2_proxy
+      # Email domain restriction (optional)
+      - --email-domain=yourcompany.com
+    ports:
+      - "443:4180"
+    environment:
+      OAUTH2_PROXY_COOKIE_SECRET: ${COOKIE_SECRET}
+
+  redmine:
+    image: redmine:6.0
+    environment:
+      # Trust oauth2-proxy headers for user authentication
+      REDMINE_AUTOLOGIN_COOKIE: _oauth2_proxy
+    # Not exposed directly - only through oauth2-proxy
+
+  hocuspocus:
+    image: ghcr.io/d-led/redmine_yjs-hocuspocus:latest
+    # Not exposed directly - only through oauth2-proxy
+```
+
+#### Redmine Configuration for OAuth2 Proxy Headers
+
+Create an initializer to auto-login users based on oauth2-proxy headers:
+
+```ruby
+# config/initializers/oauth2_proxy.rb
+
+# Auto-login users from oauth2-proxy headers
+Rails.application.config.to_prepare do
+  ApplicationController.class_eval do
+    before_action :auto_login_from_oauth2_proxy
+
+    private
+
+    def auto_login_from_oauth2_proxy
+      return if User.current.logged?
+      
+      # oauth2-proxy sets these headers
+      email = request.headers['X-Forwarded-Email']
+      user_name = request.headers['X-Forwarded-User']
+      preferred_username = request.headers['X-Forwarded-Preferred-Username']
+      
+      return unless email.present?
+
+      # Find or create user
+      user = User.find_by(mail: email)
+      
+      unless user
+        # Auto-create user from OAuth info
+        login = preferred_username || email.split('@').first
+        user = User.new(
+          login: login,
+          mail: email,
+          firstname: user_name&.split(' ')&.first || login,
+          lastname: user_name&.split(' ')&.last || '',
+          auth_source_id: nil,
+          status: User::STATUS_ACTIVE
+        )
+        user.random_password
+        user.save(validate: false)
+        Rails.logger.info "[OAuth2] Created user #{login} from proxy headers"
+      end
+
+      # Auto-login
+      if user&.active?
+        User.current = user
+        start_user_session(user)
+        Rails.logger.info "[OAuth2] Auto-logged in user #{user.login}"
+      end
+    end
+  end
+end
+```
+
+#### Hocuspocus Auth with OAuth2 Proxy
+
+When oauth2-proxy is in front, Hocuspocus receives authenticated requests with user headers:
+
+```javascript
+// server.js - Enhanced auth with oauth2-proxy headers
+onAuthenticate: async ({ request, token, documentName }) => {
+  // Get user from oauth2-proxy headers (forwarded by proxy)
+  const email = request.headers['x-forwarded-email'];
+  const userName = request.headers['x-forwarded-user'];
+  const preferredUsername = request.headers['x-forwarded-preferred-username'];
+  
+  if (email) {
+    // Authenticated via oauth2-proxy
+    return {
+      user: {
+        id: email,
+        name: userName || preferredUsername || email.split('@')[0],
+        email: email
+      }
+    };
+  }
+  
+  // Fallback to token-based auth (for direct connections)
+  if (token) {
+    try {
+      const parsed = JSON.parse(token);
+      return { user: parsed };
+    } catch (e) {
+      return { user: { id: token, name: token } };
+    }
+  }
+  
+  // Reject unauthenticated connections in production
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Authentication required');
+  }
+  
+  return { user: { id: 'anonymous', name: 'Anonymous' } };
+}
+```
+
+#### Environment Variables for OAuth2 Proxy
+
+```bash
+# .env file
+OAUTH_CLIENT_ID=your-azure-app-client-id
+OAUTH_CLIENT_SECRET=your-azure-app-client-secret
+OAUTH_TENANT_ID=your-azure-tenant-id
+COOKIE_SECRET=$(openssl rand -base64 32)
+```
+
+#### Google OAuth Example
+
+```yaml
+oauth2-proxy:
+  command:
+    - --provider=google
+    - --client-id=${GOOGLE_CLIENT_ID}
+    - --client-secret=${GOOGLE_CLIENT_SECRET}
+    - --email-domain=yourcompany.com
+```
+
+#### Benefits of OAuth2 Proxy
+
+- ✅ Single sign-on across Redmine and Hocuspocus
+- ✅ Centralized authentication (one login for all)
+- ✅ Automatic user provisioning in Redmine
+- ✅ Session management handled by proxy
+- ✅ Works with any OAuth2/OIDC provider
+- ✅ No CORS issues (same origin)
 
 ## Future: WebSocket via Redmine/Puma
 

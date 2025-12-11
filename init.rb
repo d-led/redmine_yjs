@@ -36,11 +36,19 @@ Redmine::Plugin.register :redmine_yjs do
 
   settings(
     default: {
-      # Auto-detect URL: Docker uses internal hostname, Fly.io uses external
+      # Enable Yjs by default
+      'yjs_enabled' => (ENV['YJS_ENABLED'] || '1'),
+      
+      # WebSocket proxy mode (ActionCable) - disabled by default
+      'websocket_proxy' => (ENV['YJS_WEBSOCKET_PROXY'] || '0'),
+      
+      # Direct mode: Browser connects directly to Hocuspocus
       'hocuspocus_url' => ENV['HOCUSPOCUS_URL'] || 
-        (File.exist?('/.dockerenv') ? 'ws://hocuspocus:1234' : 
-         (Rails.env.production? ? 'wss://hocuspocus.fly.dev' : 'ws://localhost:1234')),
-      'yjs_enabled' => (ENV['YJS_ENABLED'] || '1')
+        (File.exist?('/.dockerenv') ? 'ws://localhost:3000/ws' : 
+         (Rails.env.production? ? 'wss://hocuspocus.fly.dev' : 'ws://localhost:8081')),
+      
+      # Proxy mode: Internal URL for Redmine to connect to Hocuspocus
+      'hocuspocus_internal_url' => ENV['HOCUSPOCUS_INTERNAL_URL'] || 'ws://hocuspocus:8081'
     },
     partial: 'settings/yjs'
   )

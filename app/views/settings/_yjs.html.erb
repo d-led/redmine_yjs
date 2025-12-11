@@ -1,14 +1,56 @@
 <div class="box tabular">
-  <p>
-    <label><%= l(:label_hocuspocus_url) %></label>
-    <%= text_field_tag 'settings[hocuspocus_url]', @settings['hocuspocus_url'], size: 60 %>
-    <em class="info"><%= l(:text_hocuspocus_url_help) %></em>
-  </p>
+  <h3><%= l(:label_yjs_settings) %></h3>
   
   <p>
     <label><%= l(:label_yjs_enabled) %></label>
     <%= check_box_tag 'settings[yjs_enabled]', '1', @settings['yjs_enabled'] == '1' %>
     <em class="info"><%= l(:text_yjs_enabled_help) %></em>
   </p>
+  
+  <hr/>
+  <h4><%= l(:label_websocket_mode) %></h4>
+  
+  <p>
+    <label><%= l(:label_websocket_proxy) %></label>
+    <%= check_box_tag 'settings[websocket_proxy]', '1', @settings['websocket_proxy'] == '1', 
+        id: 'websocket_proxy_checkbox' %>
+    <em class="info"><%= l(:text_websocket_proxy_help) %></em>
+  </p>
+  
+  <div id="direct_mode_settings" style="<%= @settings['websocket_proxy'] == '1' ? 'display:none' : '' %>">
+    <p>
+      <label><%= l(:label_hocuspocus_url) %></label>
+      <%= text_field_tag 'settings[hocuspocus_url]', @settings['hocuspocus_url'], size: 60 %>
+      <em class="info"><%= l(:text_hocuspocus_url_help) %></em>
+    </p>
+  </div>
+  
+  <div id="proxy_mode_settings" style="<%= @settings['websocket_proxy'] == '1' ? '' : 'display:none' %>">
+    <p>
+      <label><%= l(:label_hocuspocus_internal_url) %></label>
+      <%= text_field_tag 'settings[hocuspocus_internal_url]', 
+          @settings['hocuspocus_internal_url'] || 'ws://hocuspocus:8081', size: 60 %>
+      <em class="info"><%= l(:text_hocuspocus_internal_url_help) %></em>
+    </p>
+  </div>
 </div>
 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var checkbox = document.getElementById('websocket_proxy_checkbox');
+  var directSettings = document.getElementById('direct_mode_settings');
+  var proxySettings = document.getElementById('proxy_mode_settings');
+  
+  if (checkbox) {
+    checkbox.addEventListener('change', function() {
+      if (this.checked) {
+        directSettings.style.display = 'none';
+        proxySettings.style.display = '';
+      } else {
+        directSettings.style.display = '';
+        proxySettings.style.display = 'none';
+      }
+    });
+  }
+});
+</script>
