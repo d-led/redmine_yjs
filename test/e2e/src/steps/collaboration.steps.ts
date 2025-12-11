@@ -40,7 +40,7 @@ async function openIssueEdit(page: Page, issueId: number): Promise<void> {
   
   // Wait for Yjs collaboration to initialize (status widget appears)
   await slowExpect(
-    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget')
+    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first()
   ).toBeVisible({ timeout: 20000 });
   
   // Additional wait for WebSocket connection
@@ -58,7 +58,7 @@ async function openWikiEdit(page: Page, projectId: string, pageName: string): Pr
   
   // Wait for Yjs collaboration to initialize
   await slowExpect(
-    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget')
+    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first()
   ).toBeVisible({ timeout: 20000 });
   
   // Additional wait for WebSocket connection
@@ -159,7 +159,7 @@ async function typeInEditor(page: Page, text: string, position: 'beginning' | 'e
 // Given Steps
 // =============================================================================
 
-Given('user {string} opens the issue in browser A', async function (this: ICustomWorld, username: string) {
+Given('user {string} opens the issue in browser A', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
   await ensureLoggedIn(this, 'A');
   
   if (!this.currentIssueId) {
@@ -170,7 +170,7 @@ Given('user {string} opens the issue in browser A', async function (this: ICusto
   console.log(`[Collab] Browser A opened issue ${this.currentIssueId} for editing`);
 });
 
-Given('user {string} opens the same issue in browser B', async function (this: ICustomWorld, username: string) {
+Given('user {string} opens the same issue in browser B', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
   await ensureLoggedIn(this, 'B');
   
   if (!this.currentIssueId) {
@@ -181,7 +181,7 @@ Given('user {string} opens the same issue in browser B', async function (this: I
   console.log(`[Collab] Browser B opened issue ${this.currentIssueId} for editing`);
 });
 
-Given('user {string} opens the wiki page edit in browser A', async function (this: ICustomWorld, username: string) {
+Given('user {string} opens the wiki page edit in browser A', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
   await ensureLoggedIn(this, 'A');
   
   if (!this.currentProjectId || !this.currentWikiPage) {
@@ -192,7 +192,7 @@ Given('user {string} opens the wiki page edit in browser A', async function (thi
   console.log(`[Collab] Browser A opened wiki page ${this.currentWikiPage} for editing`);
 });
 
-Given('user {string} opens the same wiki page edit in browser B', async function (this: ICustomWorld, username: string) {
+Given('user {string} opens the same wiki page edit in browser B', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
   await ensureLoggedIn(this, 'B');
   
   if (!this.currentProjectId || !this.currentWikiPage) {
@@ -201,6 +201,66 @@ Given('user {string} opens the same wiki page edit in browser B', async function
   
   await openWikiEdit(this.pageB!, this.currentProjectId, this.currentWikiPage);
   console.log(`[Collab] Browser B opened wiki page ${this.currentWikiPage} for editing`);
+});
+
+/**
+ * Login to Redmine proxy instance if not already logged in
+ */
+async function ensureLoggedInProxy(world: ICustomWorld, browser: 'A' | 'B'): Promise<void> {
+  const page = browser === 'A' ? world.pageA! : world.pageB!;
+  const loggedInKey = browser === 'A' ? 'loggedInA' : 'loggedInB';
+  
+  if (world[loggedInKey]) {
+    return;
+  }
+  
+  await page.goto(`${config.BASE_URL_PROXY}/login`);
+  await page.fill('#username', config.admin.login);
+  await page.fill('#password', config.admin.password);
+  await page.click('input[type="submit"][name="login"]');
+  await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 10000 });
+  
+  world[loggedInKey] = true;
+}
+
+/**
+ * Navigate to wiki page edit in proxy mode and wait for editor to be ready
+ */
+async function openWikiEditProxy(page: Page, projectId: string, pageName: string): Promise<void> {
+  await page.goto(`${config.BASE_URL_PROXY}/projects/${projectId}/wiki/${pageName}/edit`);
+  
+  // Wait for page to load
+  await page.waitForLoadState('domcontentloaded');
+  
+  // Wait for Yjs collaboration to initialize (via ActionCable proxy)
+  await slowExpect(
+    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first()
+  ).toBeVisible({ timeout: 20000 });
+  
+  // Additional wait for WebSocket connection through ActionCable
+  await page.waitForTimeout(1000);
+}
+
+Given('user {string} opens the wiki page edit in browser A using proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
+  await ensureLoggedInProxy(this, 'A');
+  
+  if (!this.currentProjectId || !this.currentWikiPage) {
+    throw new Error('No wiki page context. Make sure "a wiki page exists in proxy mode" step ran first.');
+  }
+  
+  await openWikiEditProxy(this.pageA!, this.currentProjectId, this.currentWikiPage);
+  console.log(`[Collab] Browser A opened wiki page ${this.currentWikiPage} for editing (proxy mode)`);
+});
+
+Given('user {string} opens the same wiki page edit in browser B using proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
+  await ensureLoggedInProxy(this, 'B');
+  
+  if (!this.currentProjectId || !this.currentWikiPage) {
+    throw new Error('No wiki page context. Make sure "a wiki page exists in proxy mode" step ran first.');
+  }
+  
+  await openWikiEditProxy(this.pageB!, this.currentProjectId, this.currentWikiPage);
+  console.log(`[Collab] Browser B opened wiki page ${this.currentWikiPage} for editing (proxy mode)`);
 });
 
 // =============================================================================
@@ -381,7 +441,7 @@ async function waitForCollaborationReady(page: Page): Promise<void> {
   
   // Wait for Yjs collaboration to initialize (status widget appears)
   await slowExpect(
-    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget')
+    page.locator('#yjs-collaboration-status, #yjs-connection-status, .yjs-collaboration-status-widget').first()
   ).toBeVisible({ timeout: 20000 });
   
   // Wait for WebSocket connection to be established

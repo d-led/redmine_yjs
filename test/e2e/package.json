@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "End-to-end tests for Redmine Yjs collaborative editing plugin",
   "scripts": {
-    "test": "cucumber-js",
+    "test": "./test-runner.sh",
+    "test:direct": "./test-runner.sh --profile default",
     "test:report": "npx playwright show-report",
     "prettier": "prettier -w ."
   },

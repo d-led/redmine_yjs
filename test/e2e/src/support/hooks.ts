@@ -10,6 +10,7 @@ import {
   BeforeAll,
   AfterAll,
   Status,
+  setDefaultTimeout,
 } from '@cucumber/cucumber';
 import { chromium, Browser } from '@playwright/test';
 import { ICustomWorld } from './custom-world';
@@ -17,6 +18,48 @@ import { config } from './config';
 
 // Shared browser instance across all tests
 let sharedBrowser: Browser | undefined;
+
+// Set default timeout for all steps (60 seconds, or unlimited if debugging)
+setDefaultTimeout(process.env.PWDEBUG ? -1 : 60 * 1000);
+
+/**
+ * Cleanup function to ensure browser is closed
+ */
+async function cleanupBrowser(): Promise<void> {
+  if (sharedBrowser) {
+    try {
+      await sharedBrowser.close();
+    } catch (e) {
+      console.warn('[Hooks] Error closing browser during cleanup:', e);
+    }
+    sharedBrowser = undefined;
+  }
+}
+
+// Ensure cleanup on process termination
+process.on('SIGINT', async () => {
+  console.log('\n[Hooks] SIGINT received, cleaning up...');
+  await cleanupBrowser();
+  process.exit(130); // Standard exit code for SIGINT
+});
+
+process.on('SIGTERM', async () => {
+  console.log('\n[Hooks] SIGTERM received, cleaning up...');
+  await cleanupBrowser();
+  process.exit(143); // Standard exit code for SIGTERM
+});
+
+process.on('uncaughtException', async (error) => {
+  console.error('[Hooks] Uncaught exception:', error);
+  await cleanupBrowser();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason) => {
+  console.error('[Hooks] Unhandled rejection:', reason);
+  await cleanupBrowser();
+  process.exit(1);
+});
 
 /**
  * Wait for a URL to become available (basic HTTP check)
@@ -90,7 +133,8 @@ async function waitForRedmineReady(baseUrl: string, maxRetries = 60, intervalMs 
 // plus Hocuspocus check and browser launch. Use 5 minutes to be safe.
 BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
   console.log('[Hooks] BeforeAll: Starting test suite');
-  console.log(`[Hooks] Redmine URL: ${config.BASE_URL}`);
+  console.log(`[Hooks] Redmine URL (direct): ${config.BASE_URL}`);
+  console.log(`[Hooks] Redmine URL (proxy): ${config.BASE_URL_PROXY}`);
   console.log(`[Hooks] Hocuspocus URL: ${config.HOCUSPOCUS_URL}`);
   
   // Wait for Hocuspocus to be available (quick startup)
@@ -100,13 +144,22 @@ BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
     throw new Error(`Hocuspocus not available at ${config.HOCUSPOCUS_URL}/health. Check docker-compose.test.yml`);
   }
   
-  // Wait for Redmine to be FULLY ready (Rails + DB + migrations complete)
-  console.log('[Hooks] Checking Redmine (this may take a while on first run)...');
+  // Wait for both Redmine instances to be FULLY ready (Rails + DB + migrations complete)
+  console.log('[Hooks] Checking Redmine (direct mode)...');
   const redmineReady = await waitForRedmineReady(config.BASE_URL, 90, 3000);
   if (!redmineReady) {
     throw new Error(
       `Redmine not fully ready at ${config.BASE_URL}. ` +
       `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml logs redmine`
+    );
+  }
+  
+  console.log('[Hooks] Checking Redmine (proxy mode)...');
+  const redmineProxyReady = await waitForRedmineReady(config.BASE_URL_PROXY, 90, 3000);
+  if (!redmineProxyReady) {
+    throw new Error(
+      `Redmine proxy not fully ready at ${config.BASE_URL_PROXY}. ` +
+      `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml logs redmine-proxy`
     );
   }
   
@@ -121,30 +174,47 @@ BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
 
 AfterAll(async function () {
   console.log('[Hooks] AfterAll: Cleaning up');
-  
-  if (sharedBrowser) {
-    await sharedBrowser.close();
-    sharedBrowser = undefined;
-  }
-  
+  await cleanupBrowser();
   console.log('[Hooks] AfterAll: Cleanup complete');
 });
 
 Before(async function (this: ICustomWorld, { pickle }) {
   this.startTime = new Date();
-  this.testName = pickle.name;
+  this.testName = pickle.name.replace(/\W/g, '-');
   this.feature = pickle;
   this.debug = process.env.DEBUG === 'true';
   
-  console.log(`[Hooks] Before: Starting scenario "${this.testName}"`);
+  console.log(`[Hooks] Before: Starting scenario "${pickle.name}"`);
   
+  // Ensure browser is available and connected (recreate if needed)
   if (!sharedBrowser) {
-    throw new Error('Browser not initialized. BeforeAll hook may have failed.');
+    console.log('[Hooks] Browser not initialized, creating new one...');
+    sharedBrowser = await chromium.launch({
+      headless: config.headless,
+      slowMo: config.slowMo,
+    });
+  }
+  
+  // Check if browser is still connected by trying to get version
+  try {
+    await sharedBrowser.version();
+  } catch (e) {
+    console.log('[Hooks] Browser disconnected, creating new one...');
+    try {
+      await sharedBrowser.close();
+    } catch {
+      // Ignore errors closing old browser
+    }
+    sharedBrowser = await chromium.launch({
+      headless: config.headless,
+      slowMo: config.slowMo,
+    });
   }
   
   this.browser = sharedBrowser;
   
   // Create two separate browser contexts (simulates two different sessions)
+  // Fresh contexts for each scenario (following mermaidlive pattern)
   this.contextA = await this.browser.newContext({
     viewport: { width: 1280, height: 720 },
     userAgent: 'Playwright E2E Test - Browser A',
@@ -174,22 +244,28 @@ After(async function (this: ICustomWorld, { result }) {
   const duration = this.startTime ? Date.now() - this.startTime.getTime() : 0;
   console.log(`[Hooks] After: Scenario "${this.testName}" ${result?.status} (${duration}ms)`);
   
-  // Take screenshots on failure
+  // Take screenshots on failure (following mermaidlive pattern)
   if (result?.status === Status.FAILED) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const safeName = this.testName?.replace(/[^a-zA-Z0-9]/g, '_') || 'unknown';
+    const safeName = this.testName || 'unknown';
     
     try {
       if (this.pageA) {
+        const image = await this.pageA.screenshot({ fullPage: true });
+        // Could attach image here if using Cucumber's attach API
         await this.pageA.screenshot({
           path: `reports/screenshots/${safeName}_A_${timestamp}.png`,
           fullPage: true,
+        }).catch(() => {
+          // Page already closed, skip screenshot
         });
       }
       if (this.pageB) {
         await this.pageB.screenshot({
           path: `reports/screenshots/${safeName}_B_${timestamp}.png`,
           fullPage: true,
+        }).catch(() => {
+          // Page already closed, skip screenshot
         });
       }
     } catch (e) {
@@ -197,17 +273,27 @@ After(async function (this: ICustomWorld, { result }) {
     }
   }
   
-  // Close contexts (not the browser - it's shared)
-  if (this.contextA) {
-    await this.contextA.close();
-    this.contextA = undefined;
-    this.pageA = undefined;
+  // Close pages and contexts (following mermaidlive pattern - clean up per scenario)
+  // Close pages first, then contexts
+  try {
+    await this.pageA?.close();
+  } catch (e) {
+    // Page already closed, ignore
   }
-  
-  if (this.contextB) {
-    await this.contextB.close();
-    this.contextB = undefined;
-    this.pageB = undefined;
+  try {
+    await this.pageB?.close();
+  } catch (e) {
+    // Page already closed, ignore
+  }
+  try {
+    await this.contextA?.close();
+  } catch (e) {
+    // Context already closed, ignore
+  }
+  try {
+    await this.contextB?.close();
+  } catch (e) {
+    // Context already closed, ignore
   }
 });
 

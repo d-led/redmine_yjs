@@ -1,0 +1,34 @@
+# Test Redmine image with redmine_yjs plugin pre-installed and ActionCable proxy mode enabled
+# Based on official Redmine image
+ARG REDMINE_TAG=6.0
+
+FROM redmine:${REDMINE_TAG}
+
+# Install SQLite and curl for health checks
+# Note: sqlite3 gem is already included in Redmine 6.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sqlite3 \
+    libsqlite3-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src/redmine
+
+# Copy the plugin (context is plugin root)
+COPY . /usr/src/redmine/plugins/redmine_yjs/
+
+# Copy plugin assets to public directory (Redmine 6.x requirement)
+RUN mkdir -p /usr/src/redmine/public/plugin_assets/redmine_yjs \
+    && cp -r /usr/src/redmine/plugins/redmine_yjs/assets/* /usr/src/redmine/public/plugin_assets/redmine_yjs/ 2>/dev/null || true
+
+# Copy ActionCable config
+COPY test/e2e/cable.yml /usr/src/redmine/config/cable.yml
+
+# Copy entrypoint script for proxy mode
+COPY test/e2e/test-entrypoint-proxy.sh /usr/local/bin/test-entrypoint-proxy.sh
+RUN chmod +x /usr/local/bin/test-entrypoint-proxy.sh
+
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/local/bin/test-entrypoint-proxy.sh"]
+

@@ -35,6 +35,36 @@ services:
       retries: 30
       start_period: 90s
 
+  redmine-proxy:
+    build:
+      context: ../..  # Plugin root directory
+      dockerfile: test/e2e/Dockerfile.redmine-proxy
+    container_name: redmine_yjs_test_app_proxy
+    depends_on:
+      hocuspocus:
+        condition: service_healthy
+    environment:
+      REDMINE_DB_SQLITE: "true"
+      RAILS_ENV: production
+      REDMINE_ADMIN_PASSWORD: "admin123"
+      SECRET_KEY_BASE: test-secret-key-for-e2e-testing-proxy
+      WEB_CONCURRENCY: 0
+      RAILS_MAX_THREADS: 2
+      RAILS_LOG_TO_STDOUT: "true"
+      REDMINE_LOAD_DEFAULT_DATA: "true"
+      REDMINE_LANG: en
+      HOCUSPOCUS_URL: "ws://0.0.0.0:8081"
+      HOCUSPOCUS_INTERNAL_URL: "ws://hocuspocus:8081"
+      YJS_ENABLED: "1"
+    ports:
+      - "3001:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
   hocuspocus:
     build:
       context: ../../hocuspocus

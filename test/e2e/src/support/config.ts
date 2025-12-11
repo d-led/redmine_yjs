@@ -3,6 +3,7 @@
  * 
  * Environment variables:
  * - SUT_BASE_URL: Redmine base URL (default: http://localhost:3000)
+ * - SUT_BASE_URL_PROXY: Redmine proxy mode base URL (default: http://localhost:3001)
  * - HOCUSPOCUS_URL: Hocuspocus WebSocket URL (default: ws://localhost:8081)
  * - START_SERVER: Whether to start the server (default: false)
  * - HEADLESS: Run browsers in headless mode (default: true)
@@ -16,8 +17,10 @@ const isMacOS = process.platform === 'darwin';
 const defaultHost = isMacOS ? '0.0.0.0' : '127.0.0.1';
 
 interface TestConfig {
-  /** Redmine base URL */
+  /** Redmine base URL (direct WebSocket mode) */
   BASE_URL: string;
+  /** Redmine base URL (ActionCable proxy mode) */
+  BASE_URL_PROXY: string;
   /** Hocuspocus WebSocket URL for health checks */
   HOCUSPOCUS_URL: string;
   /** Hocuspocus WebSocket URL that browsers will use */
@@ -41,6 +44,7 @@ interface TestConfig {
 
 export const config: TestConfig = {
   BASE_URL: process.env.SUT_BASE_URL || `http://${defaultHost}:3000`,
+  BASE_URL_PROXY: process.env.SUT_BASE_URL_PROXY || `http://${defaultHost}:3001`,
   HOCUSPOCUS_URL: process.env.HOCUSPOCUS_URL || `http://${defaultHost}:8081`,
   HOCUSPOCUS_WS_URL: process.env.HOCUSPOCUS_WS_URL || `ws://${defaultHost}:8081`,
   startServer: process.env.START_SERVER === 'true',
@@ -54,7 +58,8 @@ export const config: TestConfig = {
 };
 
 console.log('[Config] Test configuration loaded:');
-console.log(`  BASE_URL: ${config.BASE_URL}`);
+console.log(`  BASE_URL (direct): ${config.BASE_URL}`);
+console.log(`  BASE_URL_PROXY (ActionCable): ${config.BASE_URL_PROXY}`);
 console.log(`  HOCUSPOCUS_URL: ${config.HOCUSPOCUS_URL}`);
 console.log(`  HOCUSPOCUS_WS_URL: ${config.HOCUSPOCUS_WS_URL}`);
 console.log(`  Headless: ${config.headless}`);
