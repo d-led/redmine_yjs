@@ -369,10 +369,20 @@ When('the Hocuspocus connection is interrupted', async function (this: ICustomWo
         if (collab.provider) {
           console.log('[Test] Forcing WebSocket disconnect for provider:', collab.documentName);
           // Disconnect the provider - this should trigger onDisconnect callback
+          // First close the WebSocket directly to force immediate disconnect
           if (collab.provider.ws) {
-            collab.provider.ws.close(); // Close WebSocket directly
+            try {
+              collab.provider.ws.close(); // Close WebSocket directly
+            } catch (e) {
+              console.log('[Test] Error closing WebSocket:', e);
+            }
           }
-          collab.provider.disconnect(); // Also call disconnect method
+          // Then call disconnect method to trigger callbacks
+          try {
+            collab.provider.disconnect(); // This should trigger onDisconnect
+          } catch (e) {
+            console.log('[Test] Error calling disconnect:', e);
+          }
         }
       });
     }
@@ -380,11 +390,28 @@ When('the Hocuspocus connection is interrupted', async function (this: ICustomWo
   
   // Wait for disconnection to be detected
   // The provider's onDisconnect callback should fire and update the widget
-  await this.pageA!.waitForTimeout(2000);
+  // Wait a bit longer to ensure the status update propagates
+  await this.pageA!.waitForTimeout(1000);
   
   // Verify the widget has been updated to disconnected state
+  // Wait for the class to change, checking periodically
   const statusWidget = this.pageA!.locator('#yjs-collaboration-status, .yjs-collaboration-status-widget').first();
-  await slowExpect(statusWidget).toHaveClass(/disconnected/, { timeout: 10000 });
+  
+  // Wait for disconnected class to appear (with retries)
+  let attempts = 0;
+  const maxAttempts = 20;
+  while (attempts < maxAttempts) {
+    const className = await statusWidget.getAttribute('class').catch(() => '');
+    if (className && className.includes('disconnected')) {
+      console.log('[Test] Disconnected state detected after', attempts, 'attempts');
+      return;
+    }
+    await this.pageA!.waitForTimeout(500);
+    attempts++;
+  }
+  
+  // Final check - this will fail if still not disconnected
+  await slowExpect(statusWidget).toHaveClass(/disconnected/, { timeout: 5000 });
 });
 
 When('the Hocuspocus connection is restored', async function (this: ICustomWorld) {
@@ -434,7 +461,8 @@ Then('browser A shows {int} other editor(s) connected', async function (this: IC
     
     for (let i = 0; i < maxAttempts; i++) {
       await this.pageA!.waitForTimeout(1000);
-      const userBadges = statusWidget.locator('.yjs-user-badge');
+      // Count badges by unique session/client IDs (more reliable)
+      const userBadges = statusWidget.locator('.yjs-user-badge[data-session-id], .yjs-user-badge[data-client-id], .yjs-user-badge');
       const currentCount = await userBadges.count();
       
       if (currentCount === count) {
@@ -447,21 +475,33 @@ Then('browser A shows {int} other editor(s) connected', async function (this: IC
       } else {
         stableCount = 0; // Reset if count doesn't match expected
         if (i % 5 === 0) {
-          // Log progress every 5 attempts
-          const badgeTexts = await userBadges.allTextContents().catch(() => []);
-          console.log(`[Collab] Browser A: Waiting for ${count} badge(s), currently ${currentCount}:`, badgeTexts);
+          // Log progress every 5 attempts - show session IDs for debugging
+          const badgeInfo = await userBadges.evaluateAll((badges) => {
+            return badges.map((badge: HTMLElement) => ({
+              sessionId: badge.getAttribute('data-session-id'),
+              clientId: badge.getAttribute('data-client-id'),
+              text: badge.textContent?.trim()
+            }));
+          }).catch(() => []);
+          console.log(`[Collab] Browser A: Waiting for ${count} badge(s), currently ${currentCount}:`, badgeInfo);
         }
       }
     }
     
     // If we get here, the count never stabilized at the expected value
-    const userBadges = statusWidget.locator('.yjs-user-badge');
+    const userBadges = statusWidget.locator('.yjs-user-badge[data-session-id], .yjs-user-badge[data-client-id], .yjs-user-badge');
     const finalCount = await userBadges.count();
-    const badgeTexts = await userBadges.allTextContents().catch(() => []);
+    const badgeInfo = await userBadges.evaluateAll((badges) => {
+      return badges.map((badge: HTMLElement) => ({
+        sessionId: badge.getAttribute('data-session-id'),
+        clientId: badge.getAttribute('data-client-id'),
+        text: badge.textContent?.trim()
+      }));
+    }).catch(() => []);
     const widgetHtml = await statusWidget.innerHTML().catch(() => '');
     
     console.error(`[Collab] Browser A: Expected ${count} badge(s), but count never stabilized. Final count: ${finalCount}`);
-    console.error(`[Collab] Browser A badge texts:`, badgeTexts);
+    console.error(`[Collab] Browser A badge info:`, badgeInfo);
     console.error(`[Collab] Browser A widget HTML:`, widgetHtml.substring(0, 1000));
     
     // Final assertion - this will fail with a clear error

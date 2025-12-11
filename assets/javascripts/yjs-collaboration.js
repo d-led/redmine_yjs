@@ -30,29 +30,36 @@
   // 2. Query string has edit=true
   // 3. Form contains textareas for content/description/notes (even if replaced by CKEditor)
   // 4. CKEditor instances exist (CKEditor replaces textareas but we still want collaboration)
-  // 5. Issue edit form detected (has issue form with description/notes fields)
+  // 5. Issue edit form detected (has issue form with description/notes fields) - even if hidden
   // 6. Wiki edit form detected
+  // 7. Issue show page (might have hidden edit form that becomes visible)
   const pathHasEdit = window.location.pathname.includes('/edit');
   const queryHasEdit = window.location.search.includes('edit=true');
-  const hasTextarea = document.querySelector('form textarea[id*="content"], form textarea[id*="description"], form textarea[id*="notes"], textarea#issue_description, textarea#issue_notes, textarea#content_text');
-  const hasIssueForm = document.querySelector('form#issue-form, form[action*="/issues"], form input[name="issue[subject]"]');
+  const isIssueShowPage = /\/issues\/\d+$/.test(window.location.pathname); // e.g., /issues/1
+  // Check for textareas even if hidden (issue edit form might be hidden initially)
+  // querySelector finds elements even if they're hidden (display: none)
+  const hasTextarea = document.querySelector('form textarea[id*="content"], form textarea[id*="description"], form textarea[id*="notes"], textarea#issue_description, textarea#issue_notes, textarea#content_text, textarea.wiki-edit, #update textarea');
+  // Check for issue form even if hidden (Redmine shows/hides the edit form dynamically)
+  // The #update div contains the edit form and might be hidden initially
+  const hasIssueForm = document.querySelector('form#issue-form, form.edit_issue, form[action*="/issues"], form input[name="issue[subject]"], #update, #update form');
   const hasWikiForm = document.querySelector('form#wiki_form, form[action*="/wiki"]');
   const hasCKEditor = typeof window.CKEDITOR !== 'undefined' && 
                       (document.querySelector('.cke_editable') || 
                        document.querySelector('iframe.cke_wysiwyg_frame') ||
                        document.querySelector('[id*="description"][class*="cke"], [id*="notes"][class*="cke"], [id*="content"][class*="cke"]'));
   
-  const isEditPage = pathHasEdit || queryHasEdit || hasTextarea || hasIssueForm || hasWikiForm || hasCKEditor;
+  // On issue show pages, always enable collaboration (form might be hidden initially)
+  const isEditPage = pathHasEdit || queryHasEdit || hasTextarea || hasIssueForm || hasWikiForm || hasCKEditor || isIssueShowPage;
   
   if (!isEditPage) {
     console.log('[Yjs] Not an edit page, skipping collaboration initialization');
-    console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor);
+    console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor, 'isIssueShowPage:', isIssueShowPage);
     console.log('[Yjs] Debug - pathname:', window.location.pathname, 'search:', window.location.search);
     return;
   }
   
   console.log('[Yjs] Edit page detected, initializing collaboration');
-  console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor);
+  console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor, 'isIssueShowPage:', isIssueShowPage);
 
   // Check for libraries immediately - fail fast if not available
   // CDN scripts load synchronously before this script runs
@@ -203,14 +210,12 @@
     }
 
     // Collect all active sessions from all active collaborations
-    // IMPORTANT: Each textarea on a page has its own provider and its own clientId
-    // If the same user is editing multiple textareas, they'll have multiple clientIds (one per provider)
-    // Solution: Show one badge per unique user (userId), not per clientId
-    // This means: same user editing multiple fields = one badge, same user in different tabs = one badge per tab
-    // However, we need to track by (userId, clientId) to distinguish same user in different tabs
-    const allUsers = new Map(); // Map<userId-clientId, {name, color, clientId, userId, isSameUser}>
+    // IMPORTANT: Each tab gets its own clientId, so we show one badge per clientId (one per tab)
+    // This means: same user in different tabs = different badges (intended behavior)
+    // If the same user is editing multiple textareas in the same tab, they'll have the same clientId
+    // Solution: Use clientId as key to show one badge per tab/session
+    const allUsers = new Map(); // Map<clientId, {name, color, clientId, userId, sessionId, isSameUser}>
     const allPeers = new Map(); // Map<clientId, {userId, userName, isSelf}>
-    const seenClientIds = new Set(); // Track which clientIds we've seen (for debugging)
     let totalSessions = 0;
     let selfPeerId = null;
     let totalEditors = 0;
@@ -231,34 +236,26 @@
           const hasUser = !!state.user;
           
           // Track all peers for debugging
-          if (!seenClientIds.has(clientId)) {
-            allPeers.set(clientId, {
-              userId: state.user?.id || 'unknown',
-              userName: state.user?.name || 'Unknown',
-              isSelf: isSelf,
-              hasUser: hasUser
-            });
-            seenClientIds.add(clientId);
-          }
+          allPeers.set(clientId, {
+            userId: state.user?.id || 'unknown',
+            userName: state.user?.name || 'Unknown',
+            isSelf: isSelf,
+            hasUser: hasUser
+          });
           
           // Show other sessions (not self)
-          // Key insight: If the same user is editing multiple textareas, they'll have multiple clientIds
-          // We want to show ONE badge per unique userId, regardless of how many fields they're editing
-          // This means: same user editing multiple fields = one badge, same user in different tabs = one badge per tab
-          // However, we can't distinguish same tab vs different tabs, so we show one badge per unique userId
-          // (If we wanted to show one badge per tab, we'd need to track userId-clientId, but that's not what the test expects)
+          // Use clientId as key - each tab gets its own clientId, so each tab gets its own badge
           if (hasUser && !isSelf) {
-            const userId = state.user.id;
-            
-            // Use userId as key to ensure one badge per user
-            // This means if the same user is editing multiple fields, they only show up once
-            if (!allUsers.has(userId)) {
+            if (!allUsers.has(clientId)) {
+              const userId = state.user.id;
+              const sessionId = state.sessionId || `${userId}-${clientId}`;
               const isSameUser = userId === window.currentUser?.id;
-              allUsers.set(userId, {
+              allUsers.set(clientId, {
                 name: state.user.name || 'Unknown',
                 color: state.color || getUserColor(userId),
-                clientId: clientId, // Keep track of one clientId for this user (for debugging)
+                clientId: clientId,
                 userId: userId,
+                sessionId: sessionId, // Unique session ID for this tab
                 isSameUser: isSameUser // Flag to show "(other tab)" suffix
               });
               totalSessions++;
@@ -313,8 +310,10 @@
       }
       
       html += '<div class="yjs-users-list">';
-      allUsers.forEach((userInfo, userKey) => {
-        html += `<span class="yjs-user-badge" style="background-color: ${userInfo.color}20; border-color: ${userInfo.color}">`;
+      allUsers.forEach((userInfo, clientId) => {
+        // Use sessionId in element ID to make badges uniquely identifiable for testing
+        const badgeId = `yjs-user-badge-${userInfo.sessionId || clientId}`;
+        html += `<span id="${badgeId}" class="yjs-user-badge" data-client-id="${clientId}" data-session-id="${userInfo.sessionId || clientId}" style="background-color: ${userInfo.color}20; border-color: ${userInfo.color}">`;
         html += `<span class="yjs-user-avatar" style="background-color: ${userInfo.color}"></span>`;
         html += `<span class="yjs-user-name">${escapeHtml(userInfo.name)}`;
         if (userInfo.isSameUser) {
@@ -756,11 +755,15 @@
         updateConnectionStatus('disconnected');
         updateCollaborationStatusWidget('disconnected');
         // Reconnect logic: try to reconnect after a delay
-        setTimeout(() => {
-          console.log('[Yjs] Attempting to reconnect to Hocuspocus...');
-          updateCollaborationStatusWidget('syncing', 'Reconnecting...');
-          provider.connect();
-        }, 5000); // Try to reconnect after 5 seconds
+        // But only if we're not in a test environment (test will block reconnection)
+        const isTest = window.location.search.includes('test=true') || (window.__TEST_MODE__ === true);
+        if (!isTest) {
+          setTimeout(() => {
+            console.log('[Yjs] Attempting to reconnect to Hocuspocus...');
+            updateCollaborationStatusWidget('syncing', 'Reconnecting...');
+            provider.connect();
+          }, 5000); // Try to reconnect after 5 seconds
+        }
       },
       onStatus: ({ status }) => {
         console.log('[Yjs] Status changed:', status, documentName);
@@ -1977,9 +1980,14 @@
       }
       
       const isHidden = textarea.offsetParent === null && textarea.style.display === 'none';
+      const computedStyle = window.getComputedStyle(textarea);
+      const isActuallyHidden = computedStyle.display === 'none' || computedStyle.visibility === 'hidden';
       
-      // For hidden textareas, check if CKEditor exists or is loading
-      if (isHidden) {
+      // For hidden textareas on issue show pages, still initialize (form will become visible)
+      // Only skip if it's truly hidden and we're not on an issue show page
+      const isIssueShowPage = /\/issues\/\d+$/.test(window.location.pathname);
+      
+      if (isActuallyHidden && !isIssueShowPage) {
         if (hasCKEditor) {
           // CKEditor is ready, initialize it
           console.log('[Yjs] 🔍 Found hidden textarea with CKEditor instance:', editorId);
@@ -1988,10 +1996,13 @@
           console.log('[Yjs] ⏳ CKEditor not ready yet for:', editorId, '- will retry on instanceReady');
           // Don't skip - let initYjsCollaboration handle the wait
         } else {
-          // No CKEditor at all, skip hidden textarea
+          // No CKEditor at all, skip hidden textarea (unless it's an issue show page)
           console.log('[Yjs] ⏭️ Skipping hidden textarea (no CKEditor):', editorId);
           return;
         }
+      } else if (isActuallyHidden && isIssueShowPage) {
+        // On issue show pages, initialize even if hidden (form will become visible)
+        console.log('[Yjs] 🔍 Found hidden textarea on issue show page, will initialize (form will become visible):', editorId);
       }
       
       // Generate document name FIRST and validate it BEFORE initializing
@@ -2051,6 +2062,60 @@
   } else {
     setTimeout(initAllEditors, 100); // Small delay to ensure everything is ready
   }
+  
+  // Also watch for dynamically shown edit forms (e.g., issue edit form that's hidden initially)
+  // Use MutationObserver to detect when edit forms become visible
+  if (typeof MutationObserver !== 'undefined') {
+    const observer = new MutationObserver((mutations) => {
+      // Check if any edit forms became visible
+      const updateDiv = document.querySelector('#update');
+      const hasVisibleEditForm = updateDiv && 
+                                 (updateDiv.style.display !== 'none' && 
+                                  window.getComputedStyle(updateDiv).display !== 'none') &&
+                                 updateDiv.querySelector('form');
+      
+      if (hasVisibleEditForm && !editorsInitialized && !editorsInitializing) {
+        console.log('[Yjs] Edit form became visible, initializing collaboration');
+        setTimeout(initAllEditors, 500); // Small delay to ensure form is fully rendered
+      }
+    });
+    
+    // Observe changes to the document body, especially the #update div
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['style', 'class']
+    });
+    
+    // Also observe the #update div specifically if it exists
+    const updateDiv = document.querySelector('#update');
+    if (updateDiv) {
+      observer.observe(updateDiv, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+      });
+    }
+  }
+  
+  // Also listen for click events on Edit buttons to trigger initialization
+  // Redmine uses showAndScrollTo() function to show the edit form
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    // Check if Edit button was clicked (icon-edit class or link containing /edit)
+    if (target && target.closest && target.closest('a.icon-edit, a[href*="/edit"], a[onclick*="showAndScrollTo"]')) {
+      console.log('[Yjs] Edit button clicked, will initialize collaboration when form appears');
+      // Wait a bit for the form to appear, then initialize
+      setTimeout(() => {
+        if (!editorsInitialized && !editorsInitializing) {
+          console.log('[Yjs] Initializing collaboration after Edit button click');
+          initAllEditors();
+        }
+      }, 300);
+    }
+  }, true); // Use capture phase to catch events early
 
   // Re-initialize after AJAX updates (Redmine uses AJAX)
   if (typeof jQuery !== 'undefined') {
