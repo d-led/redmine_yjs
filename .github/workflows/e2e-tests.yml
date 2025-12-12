@@ -62,14 +62,11 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       - name: Start Docker services
-        working-directory: test/e2e
         run: |
-          echo "🐳 Starting Docker Compose services..."
-          docker compose -f docker-compose.test.yml up --build -d
-          echo "✅ Docker services started (TypeScript tests will wait for readiness)"
+          chmod +x scripts/start_test_services.sh
+          ./scripts/start_test_services.sh
 
       - name: Run E2E tests
-        working-directory: test/e2e
         env:
           SUT_BASE_URL: 'http://127.0.0.1:3000'
           HOCUSPOCUS_URL: 'http://127.0.0.1:8081'
@@ -77,8 +74,7 @@ jobs:
           HEADLESS: 'true'
           DEBUG: ${{ github.event.inputs.debug || 'false' }}
         run: |
-          mkdir -p reports/screenshots
-          npm test -- --format @cucumber/pretty-formatter
+          ./scripts/run_all_tests.sh --e2e-only
 
       - name: Upload test report
         if: always()
@@ -107,11 +103,8 @@ jobs:
           echo "=== Hocuspocus logs ==="
           docker compose -f docker-compose.test.yml logs --tail=100 hocuspocus || true
 
-      - name: Cleanup Docker services
+      - name: Stop Docker services
         if: always()
-        working-directory: test/e2e
         run: |
-          echo "🧹 Cleaning up Docker services..."
-          docker compose -f docker-compose.test.yml down -v --remove-orphans || true
-          docker system prune -f --volumes || true
-          echo "✅ Cleanup complete"
+          chmod +x scripts/stop_test_services.sh
+          ./scripts/stop_test_services.sh || true

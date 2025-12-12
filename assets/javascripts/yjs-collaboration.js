@@ -140,6 +140,42 @@
         setTimeout(() => updateConnectionStatus(state, message), 10);
         return;
       }
+      
+      // Add click handler to restart reconnection when disconnected
+      connectionStatus.addEventListener('click', () => {
+        // Check current state from element's class
+        const currentState = connectionStatus.className.includes('disconnected') ? 'disconnected' :
+                            connectionStatus.className.includes('syncing') ? 'syncing' : 'connected';
+        
+        if (currentState === 'disconnected' || currentState === 'syncing') {
+          // Find all active providers and reset their reconnection attempts
+          let reconnected = false;
+          activeCollaborations.forEach((collab) => {
+            if (collab.provider) {
+              reconnectionManager.resetAndReconnect(collab.provider);
+              reconnected = true;
+            }
+          });
+          
+          if (reconnected) {
+            console.log('[Yjs] Manual reconnection triggered by user click');
+          } else {
+            console.log('[Yjs] No active providers to reconnect');
+          }
+        }
+      });
+      
+      // Also support keyboard activation (Enter/Space)
+      connectionStatus.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          connectionStatus.click();
+        }
+      });
+      
+      // Add title attribute to show it's clickable when disconnected
+      connectionStatus.setAttribute('role', 'button');
+      connectionStatus.setAttribute('tabindex', '0');
     }
     connectionStatus.className = `yjs-status ${state}`;
     
@@ -157,6 +193,13 @@
     connectionStatus.textContent = message || (state === 'connected' ? `Collaboration active${editorCount}` : 
                                                state === 'disconnected' ? 'Disconnected' : 
                                                'Syncing...');
+    
+    // Update title/tooltip based on state
+    if (state === 'disconnected' || state === 'syncing') {
+      connectionStatus.title = 'Click to reconnect immediately';
+    } else {
+      connectionStatus.title = '';
+    }
     
     // Also update the form widget if it exists
     updateCollaborationStatusWidget(state, message);
@@ -213,6 +256,124 @@
   
   // Track which editor is currently focused/active
   let activeEditorElement = null; // The textarea or CKEditor instance that's currently focused
+
+  /**
+   * Reconnection manager with exponential backoff
+   * Tracks retry attempts per provider and implements exponential backoff
+   */
+  const reconnectionManager = {
+    // Map of provider -> { retryCount, timeoutId, baseDelay }
+    providers: new Map(),
+    
+    // Configuration
+    baseDelay: 1000, // Start with 1 second
+    maxDelay: 30000, // Cap at 30 seconds
+    maxRetries: Infinity, // No hard limit, but exponential backoff will slow down
+    
+    /**
+     * Calculate delay for next retry using exponential backoff
+     * Formula: baseDelay * (2 ^ retryCount), capped at maxDelay
+     */
+    calculateDelay(retryCount) {
+      const delay = Math.min(
+        this.baseDelay * Math.pow(2, retryCount),
+        this.maxDelay
+      );
+      return Math.round(delay);
+    },
+    
+    /**
+     * Schedule a reconnection attempt for a provider
+     */
+    scheduleReconnect(provider, documentName) {
+      const state = this.providers.get(provider) || { retryCount: 0 };
+      const delay = this.calculateDelay(state.retryCount);
+      
+      console.log(`[Yjs] Scheduling reconnect attempt ${state.retryCount + 1} for ${documentName} in ${delay}ms`);
+      
+      // Clear any existing timeout
+      if (state.timeoutId) {
+        clearTimeout(state.timeoutId);
+      }
+      
+      // Schedule new reconnect
+      const timeoutId = setTimeout(() => {
+        console.log(`[Yjs] Attempting to reconnect to Hocuspocus (attempt ${state.retryCount + 1})...`);
+        updateCollaborationStatusWidget('syncing', `Reconnecting... (attempt ${state.retryCount + 1})`);
+        provider.connect();
+      }, delay);
+      
+      // Update state
+      state.retryCount++;
+      state.timeoutId = timeoutId;
+      state.documentName = documentName;
+      this.providers.set(provider, state);
+      
+      return timeoutId;
+    },
+    
+    /**
+     * Reset retry count and reconnect immediately
+     * Called when user clicks the badge to manually reconnect
+     */
+    resetAndReconnect(provider) {
+      const state = this.providers.get(provider);
+      if (!state) {
+        console.log('[Yjs] No reconnection state found, connecting immediately');
+        provider.connect();
+        return;
+      }
+      
+      // Clear existing timeout
+      if (state.timeoutId) {
+        clearTimeout(state.timeoutId);
+        state.timeoutId = null;
+      }
+      
+      // Reset retry count
+      state.retryCount = 0;
+      this.providers.set(provider, state);
+      
+      console.log('[Yjs] Manual reconnect requested, resetting retry count and connecting immediately');
+      updateCollaborationStatusWidget('syncing', 'Reconnecting...');
+      provider.connect();
+    },
+    
+    /**
+     * Reset retry count when connection succeeds
+     */
+    onConnectSuccess(provider) {
+      const state = this.providers.get(provider);
+      if (state) {
+        // Clear any pending timeout
+        if (state.timeoutId) {
+          clearTimeout(state.timeoutId);
+          state.timeoutId = null;
+        }
+        // Reset retry count on successful connection
+        state.retryCount = 0;
+        this.providers.set(provider, state);
+        console.log('[Yjs] Connection successful, resetting retry count');
+      }
+    },
+    
+    /**
+     * Get current retry count for a provider
+     */
+    getRetryCount(provider) {
+      const state = this.providers.get(provider);
+      return state ? state.retryCount : 0;
+    },
+    
+    /**
+     * Get next retry delay for a provider
+     */
+    getNextDelay(provider) {
+      const state = this.providers.get(provider);
+      if (!state) return this.baseDelay;
+      return this.calculateDelay(state.retryCount);
+    }
+  };
   
   /**
    * Determine if an editor should have collaboration enabled
@@ -295,8 +456,8 @@
       return;
     }
     
-    // Show the widget
-    widget.style.display = '';
+    // Show the widget - use 'block' to ensure it's visible
+    widget.style.display = 'block';
 
     // Update global connection state
     if (connectionState) {
@@ -432,7 +593,10 @@
     }
 
     widget.innerHTML = html;
-    widget.className = `yjs-collaboration-status-widget ${statusClass}`;
+    // Ensure the class includes the connection state for test detection
+    // Remove any existing state classes and add the current one
+    widget.className = widget.className.replace(/\bconnected\b|\bdisconnected\b|\bsyncing\b/g, '');
+    widget.className = `yjs-collaboration-status-widget ${statusClass}`.trim();
   }
 
   /**
@@ -831,6 +995,8 @@
       token: JSON.stringify({ id: user.id, name: user.name }), // Pass user info as JSON token
       onConnect: () => {
         console.log('[Yjs] Connected to Hocuspocus:', documentName);
+        // Reset reconnection retry count on successful connection
+        reconnectionManager.onConnectSuccess(provider);
         // Generate unique session ID based on WebSocket connection (clientId from awareness)
         // Each WebSocket connection gets a unique clientId, so this ensures uniqueness per tab
         const clientId = provider.awareness.clientID;
@@ -844,21 +1010,29 @@
         // Use session color for unique per-tab colors
         provider.awareness.setLocalStateField('color', getSessionColor(sessionId));
         updateConnectionStatus('connected'); // No message - let it use the fallback with editor count
-        updateCollaborationStatusWidget('connected');
+        // Force immediate widget update to show presence - use setTimeout to ensure awareness is set
+        setTimeout(() => {
+          updateCollaborationStatusWidget('connected');
+        }, 100);
       },
       onDisconnect: () => {
         console.warn('[Yjs] Disconnected from Hocuspocus:', documentName);
         updateConnectionStatus('disconnected');
+        // Ensure widget gets disconnected class - update immediately
         updateCollaborationStatusWidget('disconnected');
-        // Reconnect logic: try to reconnect after a delay
+        // Force widget to have disconnected class for test detection
+        const widget = document.getElementById('yjs-collaboration-status') || document.querySelector('.yjs-collaboration-status-widget');
+        if (widget) {
+          widget.className = widget.className.replace(/\bconnected\b|\bsyncing\b/g, '') + ' disconnected';
+        }
+        // Reconnect logic with exponential backoff
         // But only if we're not in a test environment (test will block reconnection)
         const isTest = window.location.search.includes('test=true') || (window.__TEST_MODE__ === true);
         if (!isTest) {
-          setTimeout(() => {
-            console.log('[Yjs] Attempting to reconnect to Hocuspocus...');
-            updateCollaborationStatusWidget('syncing', 'Reconnecting...');
-            provider.connect();
-          }, 5000); // Try to reconnect after 5 seconds
+          const retryCount = reconnectionManager.getRetryCount(provider);
+          const nextDelay = reconnectionManager.getNextDelay(provider);
+          updateCollaborationStatusWidget('disconnected', `Disconnected. Retrying in ${Math.round(nextDelay / 1000)}s...`);
+          reconnectionManager.scheduleReconnect(provider, documentName);
         }
       },
       onStatus: ({ status }) => {
@@ -1052,9 +1226,15 @@
       }
       // Track this as the active editor
       activeEditorElement = textarea;
+      console.log('[Yjs] 📝 Editor focused, setting activeEditorElement and showing widget');
       // Update widget position and visibility
-      getCollaborationStatusWidget();
+      const widget = getCollaborationStatusWidget();
       updateCollaborationStatusWidget();
+      // Ensure widget is visible
+      if (widget) {
+        widget.style.display = 'block';
+        console.log('[Yjs] ✅ Widget should now be visible, display:', widget.style.display);
+      }
     });
     
     textarea.addEventListener('blur', () => {
@@ -1118,7 +1298,18 @@
         }
       });
       
-      // Debounce added/updated for batching
+      // Debounce added/updated for batching, but update widget immediately for added users
+      // This ensures presence badges appear quickly when users join
+      if (added.length > 0) {
+        // Immediately update widget when new users are added (no debounce)
+        const collab = activeCollaborations.get(textarea);
+        if (collab && collab.provider) {
+          const providerStatus = collab.provider.status || (collab.provider.synced ? 'connected' : 'connecting');
+          const connectionState = providerStatus === 'connected' ? 'connected' : 'syncing';
+          updateCollaborationStatusWidget(connectionState);
+        }
+      }
+      
       if (awarenessUpdateTimeout) {
         clearTimeout(awarenessUpdateTimeout);
       }
@@ -1178,15 +1369,23 @@
             textareaScroll: { top: textarea.scrollTop, left: textarea.scrollLeft },
             textareaSize: { width: textarea.offsetWidth, height: textarea.offsetHeight }
           });
+          // Ensure cursor is visible - set display explicitly and remove any hiding styles
           cursorEl.style.display = 'block';
+          cursorEl.style.visibility = 'visible';
+          cursorEl.style.opacity = '1';
+          cursorEl.style.position = 'absolute'; // Ensure positioning works
             cursorEl.style.left = position.x + 'px';
             cursorEl.style.top = position.y + 'px';
             cursorEl.style.height = position.lineHeight + 'px';
+            cursorEl.style.width = '2px'; // Ensure width is set
+            cursorEl.style.backgroundColor = color; // Ensure color is set
             
             const label = cursorEl.querySelector('.yjs-cursor-label');
             if (label) {
               label.style.left = '0';
               label.style.top = '-' + (parseFloat(position.lineHeight) + 4) + 'px';
+              label.style.display = 'block';
+              label.style.visibility = 'visible';
             }
           } else if (!isSelf && remoteCursors.has(clientId)) {
             remoteCursors.get(clientId).style.display = 'none';
@@ -1239,13 +1438,15 @@
         }
       });
       
-      // Update collaboration status widget - check provider connection status
-      // HocuspocusProvider uses 'status' property, not 'isConnected'
+      // Update collaboration status widget immediately when awareness changes
+      // This ensures presence badges are shown as soon as users join
       const collab = activeCollaborations.get(textarea);
       if (collab && collab.provider) {
         const providerStatus = collab.provider.status || (collab.provider.synced ? 'connected' : 'connecting');
         const connectionState = providerStatus === 'connected' ? 'connected' : 'syncing';
         updateConnectionStatus(connectionState); // Update floating badge with current count
+        // Always update widget when awareness changes to ensure presence badges are shown
+        // Pass connectionState to ensure widget reflects current connection status
         updateCollaborationStatusWidget(connectionState);
       } else {
         updateCollaborationStatusWidget('syncing');
@@ -1348,20 +1549,35 @@
         provider.awareness.setLocalStateField('sessionId', sessionId);
         provider.awareness.setLocalStateField('user', user);
         provider.awareness.setLocalStateField('textCursorOffset', null); // Cursor position in text
+        // Reset reconnection retry count on successful connection
+        reconnectionManager.onConnectSuccess(provider);
         // Use session color for unique per-tab colors
         provider.awareness.setLocalStateField('color', getSessionColor(sessionId));
         updateConnectionStatus('connected'); // No message - let it use the fallback with editor count
-        updateCollaborationStatusWidget('connected');
+        // Force immediate widget update to show presence - use setTimeout to ensure awareness is set
+        setTimeout(() => {
+          updateCollaborationStatusWidget('connected');
+        }, 100);
       },
       onDisconnect: () => {
+        console.warn('[Yjs] Disconnected from Hocuspocus (CKEditor):', documentName);
         updateConnectionStatus('disconnected');
+        // Ensure widget gets disconnected class - update immediately
         updateCollaborationStatusWidget('disconnected');
-        // Reconnect logic
-        setTimeout(() => {
-          console.log('[Yjs] Attempting to reconnect to Hocuspocus (CKEditor)...');
-          updateCollaborationStatusWidget('syncing', 'Reconnecting...');
-          provider.connect();
-        }, 5000);
+        // Force widget to have disconnected class for test detection
+        const widget = document.getElementById('yjs-collaboration-status') || document.querySelector('.yjs-collaboration-status-widget');
+        if (widget) {
+          widget.className = widget.className.replace(/\bconnected\b|\bsyncing\b/g, '') + ' disconnected';
+        }
+        // Reconnect logic with exponential backoff
+        // But only if we're not in a test environment (test will block reconnection)
+        const isTest = window.location.search.includes('test=true') || (window.__TEST_MODE__ === true);
+        if (!isTest) {
+          const retryCount = reconnectionManager.getRetryCount(provider);
+          const nextDelay = reconnectionManager.getNextDelay(provider);
+          updateCollaborationStatusWidget('disconnected', `Disconnected. Retrying in ${Math.round(nextDelay / 1000)}s...`);
+          reconnectionManager.scheduleReconnect(provider, documentName);
+        }
       },
       onStatus: ({ status }) => {
         if (status === 'connected') {
@@ -1373,6 +1589,11 @@
         } else {
           updateConnectionStatus('disconnected');
           updateCollaborationStatusWidget('disconnected');
+          // Force widget to have disconnected class for test detection
+          const widget = document.getElementById('yjs-collaboration-status') || document.querySelector('.yjs-collaboration-status-widget');
+          if (widget) {
+            widget.className = widget.className.replace(/\bconnected\b|\bsyncing\b/g, '') + ' disconnected';
+          }
         }
       },
       onSynced: () => {
@@ -1740,6 +1961,18 @@
       });
       
       // Debounce added/updated for batching
+      // Debounce added/updated for batching, but update widget immediately for added users
+      // This ensures presence badges appear quickly when users join
+      if (added.length > 0) {
+        // Immediately update widget when new users are added (no debounce)
+        const collab = activeCollaborations.get(editor);
+        if (collab && collab.provider) {
+          const providerStatus = collab.provider.status || (collab.provider.synced ? 'connected' : 'connecting');
+          const connectionState = providerStatus === 'connected' ? 'connected' : 'syncing';
+          updateCollaborationStatusWidget(connectionState);
+        }
+      }
+      
       if (awarenessUpdateTimeoutCK) {
         clearTimeout(awarenessUpdateTimeoutCK);
       }

@@ -129,37 +129,36 @@ async function waitForRedmineReady(baseUrl: string, maxRetries = 60, intervalMs 
   return false;
 }
 
-// Timeout for BeforeAll: must accommodate Redmine startup (up to 90 retries * 3s = 270s)
-// plus Hocuspocus check and browser launch. Use 5 minutes to be safe.
-BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
+// Timeout for BeforeAll: Services should already be running (started by GitHub Actions)
+// We just verify they're available and launch the browser
+BeforeAll({ timeout: 2 * 60 * 1000 }, async function () {
   console.log('[Hooks] BeforeAll: Starting test suite');
   console.log(`[Hooks] Redmine URL (direct): ${config.BASE_URL}`);
   console.log(`[Hooks] Redmine URL (proxy): ${config.BASE_URL_PROXY}`);
   console.log(`[Hooks] Hocuspocus URL: ${config.HOCUSPOCUS_URL}`);
+  console.log('[Hooks] Note: Services should already be running (started by GitHub Actions)');
   
-  // Wait for Hocuspocus to be available (quick startup)
-  console.log('[Hooks] Checking Hocuspocus...');
-  const hocuspocusAvailable = await waitForUrl(`${config.HOCUSPOCUS_URL}/health`, 30, 2000);
+  // Quick health checks - services should already be up
+  // Use shorter timeouts since services should be ready
+  console.log('[Hooks] Verifying Hocuspocus is available...');
+  const hocuspocusAvailable = await waitForUrl(`${config.HOCUSPOCUS_URL}/health`, 10, 1000);
   if (!hocuspocusAvailable) {
-    throw new Error(`Hocuspocus not available at ${config.HOCUSPOCUS_URL}/health. Check docker-compose.test.yml`);
+    throw new Error(`Hocuspocus not available at ${config.HOCUSPOCUS_URL}/health. Services should be started by GitHub Actions workflow.`);
   }
   
-  // Wait for Redmine instances to be FULLY ready (Rails + DB + migrations complete)
-  console.log('[Hooks] Checking Redmine (direct mode)...');
-  const redmineReady = await waitForRedmineReady(config.BASE_URL, 90, 3000);
+  console.log('[Hooks] Verifying Redmine (direct mode) is available...');
+  const redmineReady = await waitForRedmineReady(config.BASE_URL, 20, 2000);
   if (!redmineReady) {
     throw new Error(
-      `Redmine not fully ready at ${config.BASE_URL}. ` +
-      `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml logs redmine`
+      `Redmine not ready at ${config.BASE_URL}. Services should be started by GitHub Actions workflow.`
     );
   }
   
-  console.log('[Hooks] Checking Redmine (proxy mode)...');
-  const redmineProxyReady = await waitForRedmineReady(config.BASE_URL_PROXY, 90, 3000);
+  console.log('[Hooks] Verifying Redmine (proxy mode) is available...');
+  const redmineProxyReady = await waitForRedmineReady(config.BASE_URL_PROXY, 20, 2000);
   if (!redmineProxyReady) {
     throw new Error(
-      `Redmine proxy not fully ready at ${config.BASE_URL_PROXY}. ` +
-      `Run: docker-compose -f plugins/redmine_yjs/test/e2e/docker-compose.test.yml logs redmine-proxy`
+      `Redmine proxy not ready at ${config.BASE_URL_PROXY}. Services should be started by GitHub Actions workflow.`
     );
   }
   
@@ -169,7 +168,7 @@ BeforeAll({ timeout: 5 * 60 * 1000 }, async function () {
     slowMo: config.slowMo,
   });
   
-  console.log('[Hooks] BeforeAll: Browser launched, all services ready');
+  console.log('[Hooks] BeforeAll: Browser launched, all services verified');
 });
 
 AfterAll(async function () {

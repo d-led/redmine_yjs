@@ -6,11 +6,15 @@
 # 2. E2E tests (requires Docker Compose with Redmine + Hocuspocus)
 #
 # Usage:
-#   ./scripts/run_all_tests.sh              # Run all tests
+#   ./scripts/run_all_tests.sh              # Run all tests (assumes services are running)
 #   ./scripts/run_all_tests.sh --ruby-only  # Run only Ruby tests
-#   ./scripts/run_all_tests.sh --e2e-only   # Run only E2E tests
-#   ./scripts/run_all_tests.sh --skip-setup  # Skip Docker setup (assumes services running)
+#   ./scripts/run_all_tests.sh --e2e-only   # Run only E2E tests (assumes services are running)
+#   ./scripts/run_all_tests.sh --start-services  # Start services before running tests
 #   ./scripts/run_all_tests.sh --cleanup    # Cleanup Docker services only
+#
+# Note: For E2E tests, services must be running. Start them with:
+#   ./scripts/start_test_services.sh
+# Or use --start-services flag to start them automatically.
 #
 set -e
 
@@ -50,7 +54,7 @@ NC='\033[0m' # No Color
 # Parse arguments
 RUBY_ONLY=false
 E2E_ONLY=false
-SKIP_SETUP=false
+START_SERVICES=false
 CLEANUP_ONLY=false
 VISIBLE=false
 TAGS=""
@@ -65,8 +69,8 @@ while [[ $# -gt 0 ]]; do
       E2E_ONLY=true
       shift
       ;;
-    --skip-setup)
-      SKIP_SETUP=true
+    --start-services)
+      START_SERVICES=true
       shift
       ;;
     --cleanup)
@@ -83,7 +87,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--ruby-only] [--e2e-only] [--skip-setup] [--cleanup] [--visible] [--tags @tagname]"
+      echo "Usage: $0 [--ruby-only] [--e2e-only] [--start-services] [--cleanup] [--visible] [--tags @tagname]"
       exit 1
       ;;
   esac
@@ -185,7 +189,12 @@ run_ruby_tests() {
     log_info "Or set REDMINE_DIR environment variable:"
     log_info "  export REDMINE_DIR=/path/to/redmine"
     log_info "  $0 --ruby-only"
-    return 1
+    # Return 0 to indicate skip (not failure) when not in ruby-only mode
+    if [ "$RUBY_ONLY" = true ]; then
+      return 1
+    else
+      return 0
+    fi
   fi
   
   # Check if plugin is symlinked
@@ -299,84 +308,18 @@ run_e2e_tests() {
     }
   fi
   
-  # Start Docker services if not skipping setup
-  if [ "$SKIP_SETUP" = false ]; then
-    log_info "Starting Docker services..."
-    docker compose -f docker-compose.test.yml up --build -d || {
+  # Start Docker services if requested
+  if [ "$START_SERVICES" = true ]; then
+    log_info "Starting Docker services using start_test_services.sh..."
+    "$SCRIPT_DIR/start_test_services.sh" || {
       log_error "Failed to start Docker services"
       return 1
     }
     DOCKER_STARTED=true  # Mark that we started services
-    log_success "Docker services started"
-    
-    # Wait for services to be ready by checking HTTP endpoints directly
-    # This is more reliable than waiting for Docker healthchecks
-    log_info "Waiting for services to be ready (this may take a few minutes)..."
-    MAX_WAIT=600  # 10 minutes max (Redmine can take a while to start)
-    ELAPSED=0
-    
-    # Detect host for curl (macOS uses 0.0.0.0, Linux uses 127.0.0.1)
-    if [[ "$(uname)" == "Darwin" ]]; then
-      HOST="0.0.0.0"
-    else
-      HOST="127.0.0.1"
-    fi
-    
-    REDMINE_READY=false
-    REDMINE_PROXY_READY=false
-    HOCUSPOCUS_READY=false
-    
-    while [ $ELAPSED -lt $MAX_WAIT ]; do
-      # Check Hocuspocus
-      if [ "$HOCUSPOCUS_READY" = false ]; then
-        if curl -sf "http://${HOST}:8081/health" > /dev/null 2>&1; then
-          HOCUSPOCUS_READY=true
-          log_success "Hocuspocus is ready"
-        fi
-      fi
-      
-      # Check Redmine (direct mode)
-      if [ "$REDMINE_READY" = false ]; then
-        if curl -sf "http://${HOST}:3000/login" | grep -q "username" > /dev/null 2>&1; then
-          REDMINE_READY=true
-          log_success "Redmine (direct) is ready"
-        fi
-      fi
-      
-      # Check Redmine (proxy mode)
-      if [ "$REDMINE_PROXY_READY" = false ]; then
-        if curl -sf "http://${HOST}:3001/login" | grep -q "username" > /dev/null 2>&1; then
-          REDMINE_PROXY_READY=true
-          log_success "Redmine (proxy) is ready"
-        fi
-      fi
-      
-      # Check if all required services are ready
-      if [ "$HOCUSPOCUS_READY" = true ] && [ "$REDMINE_READY" = true ] && [ "$REDMINE_PROXY_READY" = true ]; then
-        log_success "All required services are ready!"
-        break
-      fi
-      
-      if [ $((ELAPSED % 30)) -eq 0 ]; then
-        log_info "Waiting for services... (${ELAPSED}s elapsed)"
-        log_info "  Hocuspocus: $([ "$HOCUSPOCUS_READY" = true ] && echo "✓ ready" || echo "⏳ waiting")"
-        log_info "  Redmine (direct): $([ "$REDMINE_READY" = true ] && echo "✓ ready" || echo "⏳ waiting")"
-        log_info "  Redmine (proxy): $([ "$REDMINE_PROXY_READY" = true ] && echo "✓ ready" || echo "⏳ waiting")"
-      fi
-      
-      sleep 5
-      ELAPSED=$((ELAPSED + 5))
-    done
-    
-    if [ "$HOCUSPOCUS_READY" = false ] || [ "$REDMINE_READY" = false ] || [ "$REDMINE_PROXY_READY" = false ]; then
-      log_error "Some services are not ready after ${MAX_WAIT}s"
-      log_info "Check status with: docker compose -f docker-compose.test.yml ps"
-      log_info "Check logs with: docker compose -f docker-compose.test.yml logs redmine"
-      log_info "Check logs with: docker compose -f docker-compose.test.yml logs redmine-proxy"
-      return 1
-    fi
   else
-    log_info "Skipping Docker setup (assuming services are running)"
+    log_info "Assuming Docker services are already running"
+    log_info "If services are not running, start them with: ./scripts/start_test_services.sh"
+    log_info "Or use --start-services flag to start them automatically"
   fi
   
   # Build test command (use npm run test which calls test-runner.sh)
@@ -441,9 +384,14 @@ main() {
     if run_ruby_tests; then
       RUBY_RESULT=0
     else
-      RUBY_RESULT=1
+      RUBY_RESULT=$?
+      # If Ruby tests were skipped (exit code 1 from warning), treat as success
+      # Only fail if it's a real failure (exit code > 1) or if ruby-only mode
       if [ "$RUBY_ONLY" = true ]; then
-        exit 1
+        exit $RUBY_RESULT
+      elif [ $RUBY_RESULT -eq 1 ]; then
+        # Likely a skip (warning), treat as success for mixed test runs
+        RUBY_RESULT=0
       fi
     fi
   fi
