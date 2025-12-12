@@ -38,10 +38,12 @@
   const isIssueShowPage = /\/issues\/\d+$/.test(window.location.pathname); // e.g., /issues/1
   // Check for textareas even if hidden (issue edit form might be hidden initially)
   // querySelector finds elements even if they're hidden (display: none)
-  const hasTextarea = document.querySelector('form textarea[id*="content"], form textarea[id*="description"], form textarea[id*="notes"], textarea#issue_description, textarea#issue_notes, textarea#content_text, textarea.wiki-edit, #update textarea');
+  // Include #issue_description_and_toolbar and #update which contain the edit form
+  const hasTextarea = document.querySelector('form textarea[id*="content"], form textarea[id*="description"], form textarea[id*="notes"], textarea#issue_description, textarea#issue_notes, textarea#content_text, textarea.wiki-edit, #update textarea, #issue_description_and_toolbar textarea, #update form textarea');
   // Check for issue form even if hidden (Redmine shows/hides the edit form dynamically)
   // The #update div contains the edit form and might be hidden initially
-  const hasIssueForm = document.querySelector('form#issue-form, form.edit_issue, form[action*="/issues"], form input[name="issue[subject]"], #update, #update form');
+  // Also check for #issue_description_and_toolbar which contains the description editor
+  const hasIssueForm = document.querySelector('form#issue-form, form.edit_issue, form[action*="/issues"], form input[name="issue[subject]"], #update, #update form, #issue_description_and_toolbar');
   const hasWikiForm = document.querySelector('form#wiki_form, form[action*="/wiki"]');
   const hasCKEditor = typeof window.CKEDITOR !== 'undefined' && 
                       (document.querySelector('.cke_editable') || 
@@ -166,34 +168,119 @@
   function getCollaborationStatusWidget() {
     let widget = document.getElementById('yjs-collaboration-status');
     if (!widget) {
-      // Try to find the form and inject the widget ABOVE the editor
-      const form = document.querySelector('form textarea[id*="content"], form textarea[id*="description"], form textarea[id*="notes"]')?.closest('form');
-      if (form) {
-        widget = document.createElement('div');
-        widget.id = 'yjs-collaboration-status';
-        widget.className = 'yjs-collaboration-status-widget';
-        
-        // Find the editor container (textarea or CKEditor wrapper) and insert ABOVE it
-        const firstTextarea = form.querySelector('textarea[id*="content"], textarea[id*="description"], textarea[id*="notes"]');
-        if (firstTextarea) {
-          // Insert before the textarea's parent container (usually a div or fieldset)
-          const container = firstTextarea.closest('.wiki-edit, .form-group, .box, fieldset, div');
-          if (container && container !== form) {
-            container.parentNode.insertBefore(widget, container);
-          } else {
-            firstTextarea.parentNode.insertBefore(widget, firstTextarea);
-          }
-        } else {
-          // Fallback: insert at the beginning of the form
-          form.insertBefore(widget, form.firstChild);
+      widget = document.createElement('div');
+      widget.id = 'yjs-collaboration-status';
+      widget.className = 'yjs-collaboration-status-widget';
+      widget.style.display = 'none'; // Hidden by default, shown only when editor is focused
+    }
+    
+    // If we have an active editor, place widget below it
+    if (activeEditorElement) {
+      // Find the editor container (textarea parent or CKEditor wrapper)
+      let container = null;
+      
+      if (activeEditorElement.tagName === 'TEXTAREA') {
+        // For plain text editor, find the parent container
+        container = activeEditorElement.closest('.jstEditor, .wiki-edit, .form-group, .box, fieldset, div');
+        if (!container || container === document.body) {
+          container = activeEditorElement.parentElement;
         }
+      } else if (typeof CKEDITOR !== 'undefined' && activeEditorElement.container) {
+        // For CKEditor, use the editor's container
+        container = activeEditorElement.container.$;
+      }
+      
+      if (container && widget.parentNode !== container) {
+        // Remove from old location
+        if (widget.parentNode) {
+          widget.parentNode.removeChild(widget);
+        }
+        // Insert after the container (below the editor)
+        if (container.nextSibling) {
+          container.parentNode.insertBefore(widget, container.nextSibling);
+        } else {
+          container.parentNode.appendChild(widget);
+        }
+        console.log('[Yjs] ✅ Placed collaboration widget below active editor');
       }
     }
+    
     return widget;
   }
 
   // Track global connection state
   let globalConnectionState = 'syncing';
+  
+  // Track which editor is currently focused/active
+  let activeEditorElement = null; // The textarea or CKEditor instance that's currently focused
+  
+  /**
+   * Determine if an editor should have collaboration enabled
+   * Returns true for main content editors, false for comments/notes
+   */
+  function shouldEnableCollaboration(textarea) {
+    const editorId = textarea.id || '';
+    const editorName = textarea.name || '';
+    const pathname = window.location.pathname;
+    
+    // Check if editor is in a comment/notes section
+    const isInCommentSection = textarea.closest('#add_notes, .journal, .comment, .comments, #comments, .issue-notes, fieldset#add_notes') !== null;
+    if (isInCommentSection) {
+      console.log('[Yjs] ⏭️ Editor is in comment/notes section, skipping:', editorId);
+      return false;
+    }
+    
+    // Check editor ID/name patterns that indicate comments/notes
+    const isCommentEditor = editorId.includes('comment') || 
+                           editorName.includes('comment') ||
+                           editorId.includes('journal') ||
+                           editorName.includes('journal');
+    if (isCommentEditor) {
+      console.log('[Yjs] ⏭️ Editor ID/name indicates comment/journal, skipping:', editorId);
+      return false;
+    }
+    
+    // Issue pages: only description, not notes
+    if (/\/issues\/\d+/.test(pathname)) {
+      const isDescription = editorId === 'issue_description' || 
+                            (editorName.includes('description') && !editorName.includes('notes'));
+      const isNotes = editorId === 'issue_notes' || 
+                     editorName.includes('notes');
+      if (!isDescription || isNotes) {
+        console.log('[Yjs] ⏭️ Issue page: not description editor, skipping:', editorId);
+        return false;
+      }
+      return true;
+    }
+    
+    // Wiki pages: only main content, not comments
+    if (/\/wiki\//.test(pathname)) {
+      const isMainContent = editorId === 'content_text' || 
+                           editorId.includes('content') && !editorId.includes('comment') ||
+                           editorName.includes('content') && !editorName.includes('comment');
+      if (!isMainContent) {
+        console.log('[Yjs] ⏭️ Wiki page: not main content editor, skipping:', editorId);
+        return false;
+      }
+      return true;
+    }
+    
+    // For other pages, allow if it's not clearly a comment/notes field
+    // Main content fields typically have: content, description, text (but not notes/comment)
+    const isMainContentField = (editorId.includes('content') || 
+                                editorId.includes('description') || 
+                                editorId.includes('text')) &&
+                               !editorId.includes('comment') &&
+                               !editorId.includes('notes') &&
+                               !editorId.includes('journal');
+    
+    if (!isMainContentField) {
+      console.log('[Yjs] ⏭️ Not a main content field, skipping:', editorId);
+      return false;
+    }
+    
+    return true;
+  }
 
   /**
    * Update the collaboration status widget with current state
@@ -201,6 +288,15 @@
   function updateCollaborationStatusWidget(connectionState, connectionMessage) {
     const widget = getCollaborationStatusWidget();
     if (!widget) return;
+    
+    // Only show widget when an editor is actively focused
+    if (!activeEditorElement) {
+      widget.style.display = 'none';
+      return;
+    }
+    
+    // Show the widget
+    widget.style.display = '';
 
     // Update global connection state
     if (connectionState) {
@@ -947,7 +1043,31 @@
     }
     
     // Also update on focus/blur
-    textarea.addEventListener('focus', updateCursorPosition);
+    textarea.addEventListener('focus', () => {
+      updateCursorPosition();
+      // Only track as active if this is a main content editor (not comments/notes)
+      if (!shouldEnableCollaboration(textarea)) {
+        console.log('[Yjs] ⏭️ Not tracking focus for non-main-content textarea:', textarea.id || textarea.name);
+        return;
+      }
+      // Track this as the active editor
+      activeEditorElement = textarea;
+      // Update widget position and visibility
+      getCollaborationStatusWidget();
+      updateCollaborationStatusWidget();
+    });
+    
+    textarea.addEventListener('blur', () => {
+      // Only clear if this is still the active editor (might have switched to another)
+      if (activeEditorElement === textarea) {
+        activeEditorElement = null;
+        // Hide widget when no editor is focused
+        const widget = document.getElementById('yjs-collaboration-status');
+        if (widget) {
+          widget.style.display = 'none';
+        }
+      }
+    });
 
     // Handle remote cursors and presence using Yjs awareness
     const remoteCursors = new Map();
@@ -1151,6 +1271,14 @@
 
     // Find CKEditor instance for this textarea
     const editorId = textarea.id || textarea.name;
+    
+    // IMPORTANT: Only collaborate on main content editors, NOT on comments/notes
+    // This works for issues (description), wikis (content), and other entities
+    if (!shouldEnableCollaboration(textarea)) {
+      console.log('[Yjs] ⏭️ Skipping CKEditor collaboration for non-main-content editor:', editorId);
+      return null;
+    }
+    
     const editor = CKEDITOR.instances[editorId];
     
     if (!editor) {
@@ -1487,6 +1615,34 @@
         editable.attachListener(editable, 'click', updateCKEditorCursorPosition);
       }
     });
+    
+    // Track CKEditor as active editor when focused (only if it's a main content editor)
+    editor.on('focus', function() {
+      // Only track as active if this is a main content editor (not comments/notes)
+      const editorId = editor.name;
+      // Find the corresponding textarea to check if collaboration should be enabled
+      const textarea = document.getElementById(editorId) || document.querySelector(`textarea[name="${editorId}"]`);
+      if (textarea && !shouldEnableCollaboration(textarea)) {
+        console.log('[Yjs] ⏭️ Not tracking focus for non-main-content CKEditor:', editorId);
+        return;
+      }
+      activeEditorElement = editor;
+      // Update widget position and visibility
+      getCollaborationStatusWidget();
+      updateCollaborationStatusWidget();
+    });
+    
+    editor.on('blur', function() {
+      // Only clear if this is still the active editor (might have switched to another)
+      if (activeEditorElement === editor) {
+        activeEditorElement = null;
+        // Hide widget when no editor is focused
+        const widget = document.getElementById('yjs-collaboration-status');
+        if (widget) {
+          widget.style.display = 'none';
+        }
+      }
+    });
 
     // Update textarea when editor changes (for form submission)
     editor.on('change', function() {
@@ -1820,7 +1976,12 @@
     
     // Priority: Use server-provided context first (most reliable)
     if (docContext.issue_id) {
-      // Issue document: issue-{issue_id}-{field}
+      // Issue document: use simple format issue-{issue_id} for main fields
+      // For description and notes, just use issue-{id}
+      if (fieldName.includes('description') || fieldName.includes('notes')) {
+        return `issue-${docContext.issue_id}`;
+      }
+      // For other fields, include field name
       return `issue-${docContext.issue_id}-${fieldName}`;
     }
     
@@ -1869,6 +2030,11 @@
     
     // Generate document name with fallback priority
     if (formIssueId || issueId) {
+      // For description and notes, use simple format issue-{id}
+      if (fieldName.includes('description') || fieldName.includes('notes')) {
+        return `issue-${formIssueId || issueId}`;
+      }
+      // For other fields, include field name
       return `issue-${formIssueId || issueId}-${fieldName}`;
     }
     
@@ -1949,34 +2115,62 @@
     const user = getCurrentUser();
 
     // Find all textareas that should have collaboration
+    // Include specific selectors for issue forms (even if hidden initially)
+    // For issue pages, we'll filter to only description editor later
     const selectors = [
       'textarea[id*="description"]',
-      'textarea[id*="notes"]',
       'textarea[id*="content"]',
       'textarea[id*="text"]',
       'textarea.wiki-edit',
-      'textarea.issue-notes'
+      '#issue_description_and_toolbar textarea',
+      '#update textarea',
+      'form#issue-form textarea',
+      'form.edit_issue textarea'
     ].join(', ');
     
     let editorsFound = 0;
     let editorsInitializedCount = 0;
     
-    document.querySelectorAll(selectors).forEach((textarea) => {
+    console.log('[Yjs] 🔍 Searching for textareas with selectors:', selectors);
+    const allTextareas = document.querySelectorAll(selectors);
+    console.log('[Yjs] 🔍 Found', allTextareas.length, 'textarea(s)');
+    
+    allTextareas.forEach((textarea) => {
       editorsFound++;
       
       const editorId = textarea.id || textarea.name;
       const hasCKEditor = typeof CKEDITOR !== 'undefined' && CKEDITOR.instances[editorId];
       
-      // Skip if already initialized (check both textarea and CKEditor instance keys)
-      if (activeCollaborations.has(textarea)) {
+      console.log('[Yjs] 🔍 Processing textarea:', editorId, 'id:', textarea.id, 'name:', textarea.name, 'parent:', textarea.closest('#issue_description_and_toolbar, #update, form#issue-form')?.id || 'none');
+      
+      // IMPORTANT: Only collaborate on main content editors, NOT on comments/notes
+      // This works for issues (description), wikis (content), and other entities
+      if (!shouldEnableCollaboration(textarea)) {
+        return;
+      }
+      
+      // Check if we need to switch from CKEditor to plain text (or vice versa)
+      // If textarea has collaboration but CKEditor was destroyed, clean it up
+      if (activeCollaborations.has(textarea) && !hasCKEditor) {
+        // Plain text editor is active and already has collaboration - keep it
         editorsInitializedCount++;
         return;
       }
-      // Also check if CKEditor instance is already tracked (CKEditor uses editor as key, not textarea)
+      // If CKEditor instance exists and is tracked, keep it
       if (hasCKEditor && activeCollaborations.has(CKEDITOR.instances[editorId])) {
         editorsInitializedCount++;
         console.log('[Yjs] ⏭️ Skipping already initialized CKEditor:', editorId);
         return;
+      }
+      // If textarea was tracked for CKEditor but CKEditor is gone, clean up and re-initialize
+      if (activeCollaborations.has(textarea) && hasCKEditor === false) {
+        // CKEditor was destroyed, clean up old collaboration
+        const oldCollab = activeCollaborations.get(textarea);
+        if (oldCollab && oldCollab.provider) {
+          console.log('[Yjs] 🔄 CKEditor destroyed, cleaning up old collaboration for:', editorId);
+          oldCollab.provider.destroy();
+          activeCollaborations.delete(textarea);
+        }
       }
       
       const isHidden = textarea.offsetParent === null && textarea.style.display === 'none';
@@ -2003,6 +2197,8 @@
       } else if (isActuallyHidden && isIssueShowPage) {
         // On issue show pages, initialize even if hidden (form will become visible)
         console.log('[Yjs] 🔍 Found hidden textarea on issue show page, will initialize (form will become visible):', editorId);
+      } else if (!isActuallyHidden) {
+        console.log('[Yjs] ✅ Found visible textarea:', editorId);
       }
       
       // Generate document name FIRST and validate it BEFORE initializing
@@ -2074,8 +2270,14 @@
                                   window.getComputedStyle(updateDiv).display !== 'none') &&
                                  updateDiv.querySelector('form');
       
-      if (hasVisibleEditForm && !editorsInitialized && !editorsInitializing) {
-        console.log('[Yjs] Edit form became visible, initializing collaboration');
+      // Also check if textareas became visible (e.g., switching from CKEditor to plain text)
+      const visibleTextareas = document.querySelectorAll('#issue_description_and_toolbar textarea:not([style*="display: none"]), #update textarea:not([style*="display: none"])');
+      const hasVisibleTextarea = visibleTextareas.length > 0;
+      
+      if ((hasVisibleEditForm || hasVisibleTextarea) && !editorsInitializing) {
+        console.log('[Yjs] Edit form or textarea became visible, initializing collaboration');
+        // Reset flags to allow re-initialization (in case editor mode changed)
+        editorsInitialized = false;
         setTimeout(initAllEditors, 500); // Small delay to ensure form is fully rendered
       }
     });
@@ -2092,6 +2294,18 @@
     const updateDiv = document.querySelector('#update');
     if (updateDiv) {
       observer.observe(updateDiv, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['style', 'class']
+      });
+    }
+    
+    // Also observe #issue_description_and_toolbar if it exists (issue edit form)
+    const issueDescriptionToolbar = document.querySelector('#issue_description_and_toolbar');
+    if (issueDescriptionToolbar) {
+      console.log('[Yjs] 🔍 Observing #issue_description_and_toolbar for changes');
+      observer.observe(issueDescriptionToolbar, {
         childList: true,
         subtree: true,
         attributes: true,
