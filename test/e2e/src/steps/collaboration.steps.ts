@@ -477,11 +477,14 @@ Then('browser A shows {int} other editor(s) connected', async function (this: IC
         if (i % 5 === 0) {
           // Log progress every 5 attempts - show session IDs for debugging
           const badgeInfo = await userBadges.evaluateAll((badges) => {
-            return badges.map((badge: HTMLElement) => ({
-              sessionId: badge.getAttribute('data-session-id'),
-              clientId: badge.getAttribute('data-client-id'),
-              text: badge.textContent?.trim()
-            }));
+            return badges.map((badge) => {
+              const el = badge as HTMLElement;
+              return {
+                sessionId: el.getAttribute('data-session-id'),
+                clientId: el.getAttribute('data-client-id'),
+                text: el.textContent?.trim()
+              };
+            });
           }).catch(() => []);
           console.log(`[Collab] Browser A: Waiting for ${count} badge(s), currently ${currentCount}:`, badgeInfo);
         }
@@ -492,11 +495,14 @@ Then('browser A shows {int} other editor(s) connected', async function (this: IC
     const userBadges = statusWidget.locator('.yjs-user-badge[data-session-id], .yjs-user-badge[data-client-id], .yjs-user-badge');
     const finalCount = await userBadges.count();
     const badgeInfo = await userBadges.evaluateAll((badges) => {
-      return badges.map((badge: HTMLElement) => ({
-        sessionId: badge.getAttribute('data-session-id'),
-        clientId: badge.getAttribute('data-client-id'),
-        text: badge.textContent?.trim()
-      }));
+      return badges.map((badge) => {
+        const el = badge as HTMLElement;
+        return {
+          sessionId: el.getAttribute('data-session-id'),
+          clientId: el.getAttribute('data-client-id'),
+          text: el.textContent?.trim()
+        };
+      });
     }).catch(() => []);
     const widgetHtml = await statusWidget.innerHTML().catch(() => '');
     
