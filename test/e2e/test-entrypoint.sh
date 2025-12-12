@@ -35,17 +35,6 @@ if [ -n "${REDMINE_ADMIN_PASSWORD}" ]; then
   bundle exec rails runner "u=User.find_by_login('admin'); u.password=u.password_confirmation='${REDMINE_ADMIN_PASSWORD}'; u.must_change_passwd=false; u.save!" RAILS_ENV=production 2>/dev/null || true
 fi
 
-# Configure Yjs plugin WebSocket proxy mode if HOCUSPOCUS_INTERNAL_URL is set
-if [ -n "${HOCUSPOCUS_INTERNAL_URL}" ]; then
-  echo "Enabling Yjs WebSocket proxy mode..."
-  bundle exec rails runner "
-    settings = Setting.plugin_redmine_yjs || {}
-    settings['websocket_proxy'] = '1'
-    settings['hocuspocus_internal_url'] = '${HOCUSPOCUS_INTERNAL_URL}'
-    Setting.plugin_redmine_yjs = settings
-    puts '[Test Setup] Yjs WebSocket proxy enabled'
-  " RAILS_ENV=production 2>/dev/null || echo "Warning: Could not configure Yjs proxy"
-fi
 
 # Clear cache
 bundle exec rake tmp:cache:clear RAILS_ENV=production 2>/dev/null || true

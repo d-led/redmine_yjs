@@ -50,9 +50,6 @@ export interface ICustomWorld extends World {
   /** Track logged-in state per context */
   loggedInA?: boolean;
   loggedInB?: boolean;
-  
-  /** Use proxy instance instead of direct */
-  useProxyInstance?: boolean;
 }
 
 export class CustomWorld extends World implements ICustomWorld {
@@ -67,7 +64,6 @@ export class CustomWorld extends World implements ICustomWorld {
   currentWikiPage?: string;
   loggedInA?: boolean;
   loggedInB?: boolean;
-  useProxyInstance?: boolean;
 
   constructor(options: IWorldOptions) {
     super(options);

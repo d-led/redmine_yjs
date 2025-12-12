@@ -2,13 +2,7 @@ en:
   label_yjs: Yjs Collaborative Editing
   label_yjs_settings: Collaborative Editing Settings
   label_yjs_enabled: Enable Yjs Collaborative Editing
-  
-  label_websocket_mode: WebSocket Connection Mode
-  label_websocket_proxy: Proxy WebSocket through Redmine
-  label_hocuspocus_url: Hocuspocus WebSocket URL (browser)
-  label_hocuspocus_internal_url: Hocuspocus Internal URL (server-to-server)
+  label_hocuspocus_url: Hocuspocus WebSocket URL
   
   text_yjs_enabled_help: "Enable or disable Yjs collaborative editing in Redmine editors"
-  text_websocket_proxy_help: "Route WebSocket through Redmine's ActionCable instead of direct browser connection. Avoids CORS issues and uses Redmine authentication."
-  text_hocuspocus_url_help: "WebSocket URL browsers connect to (e.g., ws://localhost:3000/ws or wss://redmine.example.com/ws)"
-  text_hocuspocus_internal_url_help: "Internal Docker/network URL for Redmine to connect to Hocuspocus (e.g., ws://hocuspocus:8081)"
+  text_hocuspocus_url_help: "WebSocket URL browsers connect to (e.g., ws://localhost:8081/ws or wss://hocuspocus.example.com/ws). Use a reverse proxy to serve /ws through Redmine's URL if needed."

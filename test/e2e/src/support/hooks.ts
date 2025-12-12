@@ -133,8 +133,7 @@ async function waitForRedmineReady(baseUrl: string, maxRetries = 60, intervalMs 
 // We just verify they're available and launch the browser
 BeforeAll({ timeout: 2 * 60 * 1000 }, async function () {
   console.log('[Hooks] BeforeAll: Starting test suite');
-  console.log(`[Hooks] Redmine URL (direct): ${config.BASE_URL}`);
-  console.log(`[Hooks] Redmine URL (proxy): ${config.BASE_URL_PROXY}`);
+  console.log(`[Hooks] Redmine URL: ${config.BASE_URL}`);
   console.log(`[Hooks] Hocuspocus URL: ${config.HOCUSPOCUS_URL}`);
   console.log('[Hooks] Note: Services should already be running (started by GitHub Actions)');
   
@@ -154,13 +153,6 @@ BeforeAll({ timeout: 2 * 60 * 1000 }, async function () {
     );
   }
   
-  console.log('[Hooks] Verifying Redmine (proxy mode) is available...');
-  const redmineProxyReady = await waitForRedmineReady(config.BASE_URL_PROXY, 20, 2000);
-  if (!redmineProxyReady) {
-    throw new Error(
-      `Redmine proxy not ready at ${config.BASE_URL_PROXY}. Services should be started by GitHub Actions workflow.`
-    );
-  }
   
   // Launch shared browser
   sharedBrowser = await chromium.launch({

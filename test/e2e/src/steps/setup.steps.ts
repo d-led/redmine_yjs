@@ -10,12 +10,9 @@ import { config } from '../support/config';
 const slowExpect = expect.configure({ timeout: 15000 });
 
 /**
- * Get the base URL based on world configuration
+ * Get the base URL
  */
 function getBaseUrl(world: ICustomWorld): string {
-  if (world.useProxyInstance) {
-    return config.BASE_URL_PROXY;
-  }
   return config.BASE_URL;
 }
 
@@ -62,16 +59,6 @@ Given('Redmine is running with Yjs collaborative editing enabled', async functio
   await this.pageA!.goto(config.BASE_URL);
   await slowExpect(this.pageA!.locator('body')).toBeVisible();
   console.log('[Setup] ✅ Redmine is running');
-});
-
-Given('Redmine is running with Yjs collaborative editing enabled in proxy mode', async function (this: ICustomWorld) {
-  // Switch to proxy instance for subsequent steps
-  this.useProxyInstance = true;
-  // Health check already done in BeforeAll hook
-  // Just verify we can reach the home page
-  await this.pageA!.goto(config.BASE_URL_PROXY);
-  await slowExpect(this.pageA!.locator('body')).toBeVisible();
-  console.log('[Setup] ✅ Redmine proxy mode is running');
 });
 
 Given('Redmine is configured with plain text editor', async function (this: ICustomWorld) {
@@ -189,102 +176,4 @@ Given('a wiki page {string} exists in {string}', { timeout: 30000 }, async funct
   }
 });
 
-Given('a test project {string} exists in proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, projectName: string) {
-  await loginAsAdminProxy(this, 'A');
-  
-  const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
-  this.currentProjectId = projectId;
-  
-  // Try to access the project first
-  const response = await this.pageA!.goto(`${config.BASE_URL_PROXY}/projects/${projectId}`);
-  
-  if (response?.status() === 404) {
-    // Project doesn't exist, create it
-    await this.pageA!.goto(`${config.BASE_URL_PROXY}/projects/new`);
-    await this.pageA!.fill('#project_name', projectName);
-    await this.pageA!.fill('#project_identifier', projectId);
-    
-    // Enable issue tracking module
-    await this.pageA!.check('input[name="project[enabled_module_names][]"][value="issue_tracking"]');
-    // Enable wiki module
-    await this.pageA!.check('input[name="project[enabled_module_names][]"][value="wiki"]');
-    
-    await this.pageA!.click('input[type="submit"][name="commit"]');
-    
-    // Wait for project creation
-    await this.pageA!.waitForURL(url => url.toString().includes(`/projects/${projectId}`), { timeout: 10000 });
-    console.log(`[Setup] Created project in proxy mode: ${projectName}`);
-  } else {
-    console.log(`[Setup] Project exists in proxy mode: ${projectName}`);
-  }
-});
-
-Given('a wiki page {string} exists in {string} in proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, pageName: string, projectName: string) {
-  await loginAsAdminProxy(this, 'A');
-  
-  const projectId = projectName.toLowerCase().replace(/\s+/g, '-');
-  this.currentProjectId = projectId;
-  this.currentWikiPage = pageName;
-  
-  // Try to access the wiki page - if it exists, do nothing (no-op for idempotency)
-  const response = await this.pageA!.goto(`${config.BASE_URL_PROXY}/projects/${projectId}/wiki/${pageName}`);
-  
-  if (response?.status() === 404 || await this.pageA!.locator('.nodata, .wiki-404').count() > 0) {
-    // Page doesn't exist, create it
-    await this.pageA!.goto(`${config.BASE_URL_PROXY}/projects/${projectId}/wiki/${pageName}/edit`);
-    
-    // Wait for editor to load
-    await this.pageA!.waitForTimeout(1000);
-    
-    // Add initial content
-    const textarea = this.pageA!.locator('textarea[id*="content"]');
-    if (await textarea.isVisible()) {
-      await textarea.fill(`Initial content for ${pageName}`);
-    }
-    
-    await this.pageA!.click('input[type="submit"][name="commit"]');
-    await this.pageA!.waitForURL(url => url.toString().includes(`/wiki/${pageName}`), { timeout: 10000 });
-    
-    console.log(`[Setup] Created wiki page in proxy mode: ${pageName}`);
-  } else {
-    // Wiki page already exists (may have been pre-created with project) - no-op
-    console.log(`[Setup] Wiki page exists in proxy mode: ${pageName} (no-op)`);
-  }
-});
-
-/**
- * Login to Redmine proxy instance as admin
- */
-async function loginAsAdminProxy(world: ICustomWorld, browser: 'A' | 'B'): Promise<void> {
-  const page = browser === 'A' ? world.pageA! : world.pageB!;
-  const loggedInKey = browser === 'A' ? 'loggedInA' : 'loggedInB';
-  
-  if (world[loggedInKey]) {
-    return; // Already logged in
-  }
-  
-  await page.goto(`${config.BASE_URL_PROXY}/login`);
-  await page.fill('#username', config.admin.login);
-  await page.fill('#password', config.admin.password);
-  await page.click('input[type="submit"][name="login"]');
-  
-  // Wait for redirect after login
-  await page.waitForURL(url => !url.toString().includes('/login'), { timeout: 10000 });
-  
-  // Wait for page to fully load
-  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {
-    // Network idle might not happen, just wait for DOM
-    return page.waitForLoadState('domcontentloaded', { timeout: 5000 });
-  });
-  
-  // Verify logged in - wait for either #loggedas or user menu in top-menu to be visible
-  await page.waitForFunction(() => {
-    const loggedas = document.getElementById('loggedas') as HTMLElement | null;
-    const topMenuUser = document.querySelector('#top-menu .user.active') as HTMLElement | null;
-    return (loggedas && loggedas.offsetParent !== null) || (topMenuUser && topMenuUser.offsetParent !== null);
-  }, { timeout: 15000 });
-  
-  world[loggedInKey] = true;
-  console.log(`[Setup] Logged in as admin in browser ${browser} (proxy mode)`);
-}
 

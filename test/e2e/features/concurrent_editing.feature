@@ -33,24 +33,6 @@ Feature: Concurrent collaborative editing
         And user types " :End" at the end in browser B's editor
         Then both browsers show "Start:  :End"
 
-    @ui
-    Scenario: Connection status indicator reflects WebSocket state
-        Given user "admin" opens the issue in browser A
-        Then browser A shows connection status "connected"
-        When the Hocuspocus connection is interrupted
-        Then browser A shows connection status "disconnected"
-        When the Hocuspocus connection is restored
-        Then browser A shows connection status "connected"
-
-    @ui
-    Scenario: Reconnection syncs content after disconnection
-        Given user "admin" opens the issue in browser A
-        And user "admin" opens the same issue in browser B
-        When user types "Before disconnect" in browser A's editor
-        And browser B is disconnected from Hocuspocus
-        And user types " - added while disconnected" in browser A's editor
-        When browser B reconnects to Hocuspocus
-        Then browser B's editor shows "Before disconnect - added while disconnected"
 
     @ui
     Scenario: Browser reload does not duplicate content

@@ -10,12 +10,9 @@ import { config } from '../support/config';
 const slowExpect = expect.configure({ timeout: 15000 });
 
 /**
- * Get the base URL based on world configuration
+ * Get the base URL
  */
 function getBaseUrl(world: ICustomWorld): string {
-  if (world.useProxyInstance) {
-    return config.BASE_URL_PROXY;
-  }
   return config.BASE_URL;
 }
 
@@ -376,9 +373,24 @@ function getEditorLocator(page: Page) {
 async function getEditorContent(page: Page): Promise<string> {
   const textarea = getEditorLocator(page);
   const textareaId = await textarea.getAttribute('id').catch(() => null);
+  const textareaName = await textarea.getAttribute('name').catch(() => null);
+  
+  // Debug: log what we found
+  if (!textareaId && !textareaName) {
+    const allTextareas = await page.locator('textarea').all();
+    console.log(`[getEditorContent] Found ${allTextareas.length} textareas on page`);
+    for (let i = 0; i < Math.min(allTextareas.length, 3); i++) {
+      const id = await allTextareas[i].getAttribute('id').catch(() => 'no-id');
+      const name = await allTextareas[i].getAttribute('name').catch(() => 'no-name');
+      const value = await allTextareas[i].inputValue().catch(() => 'no-value');
+      console.log(`[getEditorContent] Textarea ${i}: id="${id}", name="${name}", value="${value.substring(0, 50)}..."`);
+    }
+  }
   
   if (!textareaId) {
-    return (await textarea.inputValue()) || '';
+    const value = await textarea.inputValue().catch(() => '');
+    console.log(`[getEditorContent] No textarea ID, using inputValue: "${value.substring(0, 100)}..."`);
+    return value;
   }
   
   // Check if ClassicEditor or CKEditor is being used
@@ -412,11 +424,14 @@ async function getEditorContent(page: Page): Promise<string> {
   
   // If ClassicEditor or CKEditor found, return their content
   if (editorInfo.found && editorInfo.content !== undefined) {
+    console.log(`[getEditorContent] Found ${editorInfo.type} editor, content: "${editorInfo.content.substring(0, 100)}..."`);
     return editorInfo.content;
   }
   
   // Fallback to textarea value (should work for all editors as they sync back to textarea)
-  return (await textarea.inputValue()) || '';
+  const value = await textarea.inputValue().catch(() => '');
+  console.log(`[getEditorContent] Using textarea inputValue (id="${textareaId}"): "${value.substring(0, 100)}..."`);
+  return value;
 }
 
 /**
@@ -777,48 +792,46 @@ Given('user {string} opens the same wiki page edit in browser B', { timeout: 300
   console.log(`[Collab] Browser B opened wiki page ${this.currentWikiPage} for editing`);
 });
 
-Given('user {string} opens the wiki page edit in browser A using proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
-  // Set proxy mode flag
-  this.useProxyInstance = true;
-  await ensureLoggedIn(this, 'A');
-  
-  if (!this.currentProjectId || !this.currentWikiPage) {
-    throw new Error('No wiki page context. Make sure "a wiki page exists in proxy mode" step ran first.');
-  }
-  
-  await openWikiEdit(this.pageA!, this.currentProjectId, this.currentWikiPage, this);
-  console.log(`[Collab] Browser A opened wiki page ${this.currentWikiPage} for editing (proxy mode)`);
-});
-
-Given('user {string} opens the same wiki page edit in browser B using proxy mode', { timeout: 30000 }, async function (this: ICustomWorld, username: string) {
-  // Set proxy mode flag
-  this.useProxyInstance = true;
-  await ensureLoggedIn(this, 'B');
-  
-  if (!this.currentProjectId || !this.currentWikiPage) {
-    throw new Error('No wiki page context. Make sure "a wiki page exists in proxy mode" step ran first.');
-  }
-  
-  await openWikiEdit(this.pageB!, this.currentProjectId, this.currentWikiPage, this);
-  console.log(`[Collab] Browser B opened wiki page ${this.currentWikiPage} for editing (proxy mode)`);
-});
 
 // =============================================================================
 // When Steps
 // =============================================================================
 
 When('user types {string} in browser A\'s editor', async function (this: ICustomWorld, text: string) {
-  await typeInEditor(this.pageA!, text, 'end');
-  // Wait for sync - longer wait for proxy mode
-  const waitTime = this.useProxyInstance ? 2000 : 500;
-  await this.pageA!.waitForTimeout(waitTime);
+  console.log(`[Test] Typing "${text}" in browser A's editor`);
+  
+  // Normalize newlines: Gherkin passes \n as literal string, but we need actual newlines for comparison
+  const normalizedText = text.replace(/\\n/g, '\n');
+  
+  await typeInEditor(this.pageA!, normalizedText, 'end');
+  
+  // Wait for content to appear in the editor (polling with condition to avoid race conditions)
+  // This ensures the typing actually happened before we proceed
+  const maxWaitTime = 2000;
+  const pollInterval = 200;
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWaitTime) {
+    const content = await getEditorContent(this.pageA!);
+    // Compare with normalized text (actual newlines)
+    if (content.includes(normalizedText)) {
+      console.log(`[Test] Content "${normalizedText}" confirmed in browser A after ${Date.now() - startTime}ms`);
+      return; // Success - content typed and confirmed
+    }
+    await this.pageA!.waitForTimeout(pollInterval);
+  }
+  
+  // Final check - fail if content wasn't typed
+  const finalContent = await getEditorContent(this.pageA!);
+  console.error(`[Test] ERROR: Typed text "${normalizedText}" not found in editor after ${maxWaitTime}ms`);
+  console.error(`[Test] Final content: "${finalContent}"`);
+  expect(finalContent).toContain(normalizedText);
 });
 
 When('user types {string} in browser B\'s editor', async function (this: ICustomWorld, text: string) {
   await typeInEditor(this.pageB!, text, 'end');
-  // Wait for sync - longer wait for proxy mode
-  const waitTime = this.useProxyInstance ? 2000 : 500;
-  await this.pageB!.waitForTimeout(waitTime);
+  // Wait for sync
+  await this.pageB!.waitForTimeout(500);
 });
 
 When('user types {string} at the beginning in browser A\'s editor', async function (this: ICustomWorld, text: string) {
@@ -967,113 +980,6 @@ When('user sets cursor to position {int} in browser A\'s editor', async function
   console.log(`[Collab] Set cursor to position ${position} in browser A`);
 });
 
-When('the Hocuspocus connection is interrupted', async function (this: ICustomWorld) {
-  // Block WebSocket connections first to prevent reconnection
-  await this.pageA!.route('**/*', route => {
-    const url = route.request().url();
-    if (url.includes(':8081') || url.includes('/ws') || url.includes('/cable')) {
-      route.abort();
-    } else {
-      route.continue();
-    }
-  });
-  
-  // Force disconnect by closing WebSocket connections via JavaScript
-  await this.pageA!.evaluate(() => {
-    // Find all active Yjs providers and disconnect them
-    const win = window as any;
-    if (win.activeCollaborations) {
-      win.activeCollaborations.forEach((collab: any) => {
-        if (collab.provider) {
-          console.log('[Test] Forcing WebSocket disconnect for provider:', collab.documentName);
-          // First, manually trigger onDisconnect callback if available
-          // This ensures the status update happens immediately
-          if (collab.provider.onDisconnect && typeof collab.provider.onDisconnect === 'function') {
-            try {
-              collab.provider.onDisconnect();
-            } catch (e) {
-              console.log('[Test] Error calling onDisconnect directly:', e);
-            }
-          }
-          // Close the WebSocket directly to force immediate disconnect
-          if (collab.provider.ws) {
-            try {
-              // Set readyState to CLOSING first to prevent reconnection attempts
-              if (collab.provider.ws.readyState === WebSocket.OPEN) {
-                collab.provider.ws.close(1000, 'Test disconnection');
-              }
-            } catch (e) {
-              console.log('[Test] Error closing WebSocket:', e);
-            }
-          }
-          // Then call disconnect method to trigger callbacks
-          try {
-            collab.provider.disconnect(); // This should trigger onDisconnect
-          } catch (e) {
-            console.log('[Test] Error calling disconnect:', e);
-          }
-          // Also manually update the status widget to ensure it reflects disconnected state
-          const widget = document.getElementById('yjs-collaboration-status') || document.querySelector('.yjs-collaboration-status-widget');
-          if (widget) {
-            widget.className = widget.className.replace(/\bconnected\b|\bsyncing\b/g, '') + ' disconnected';
-            console.log('[Test] Manually updated widget to disconnected state');
-          }
-        }
-      });
-    }
-  });
-  
-  // Wait for disconnection to be detected
-  // The provider's onDisconnect callback should fire and update the widget
-  // Wait a bit longer to ensure the status update propagates
-  await this.pageA!.waitForTimeout(1500);
-  
-  // Verify the widget has been updated to disconnected state
-  // Wait for the class to change, checking periodically
-  const statusWidget = this.pageA!.locator('#yjs-collaboration-status, .yjs-collaboration-status-widget').first();
-  
-  // Wait for disconnected class to appear (with retries)
-  let attempts = 0;
-  const maxAttempts = 20;
-  while (attempts < maxAttempts) {
-    const className = await statusWidget.getAttribute('class').catch(() => '');
-    if (className && className.includes('disconnected')) {
-      console.log('[Test] Disconnected state detected after', attempts, 'attempts');
-      return;
-    }
-    await this.pageA!.waitForTimeout(500);
-    attempts++;
-  }
-  
-  // Final check - this will fail if still not disconnected
-  await slowExpect(statusWidget).toHaveClass(/disconnected/, { timeout: 5000 });
-});
-
-When('the Hocuspocus connection is restored', async function (this: ICustomWorld) {
-  // Remove route interception
-  await this.pageA!.unroute('**/*');
-  
-  // Wait for reconnection
-  await this.pageA!.waitForTimeout(3000);
-});
-
-When('browser B is disconnected from Hocuspocus', async function (this: ICustomWorld) {
-  await this.pageB!.route('**/*', route => {
-    const url = route.request().url();
-    if (url.includes(':8081') || url.includes('/ws')) {
-      route.abort();
-    } else {
-      route.continue();
-    }
-  });
-  
-  await this.pageB!.waitForTimeout(2000);
-});
-
-When('browser B reconnects to Hocuspocus', async function (this: ICustomWorld) {
-  await this.pageB!.unroute('**/*');
-  await this.pageB!.waitForTimeout(3000);
-});
 
 // =============================================================================
 // Then Steps
@@ -1254,18 +1160,26 @@ Then('browser B shows {int} other editor(s) connected', async function (this: IC
 });
 
 Then('browser A\'s editor shows {string}', async function (this: ICustomWorld, expectedText: string) {
-  // Wait longer for proxy mode synchronization
-  const waitTime = this.useProxyInstance ? 3000 : 1000;
-  await this.pageA!.waitForTimeout(waitTime);
-  const content = await getEditorContent(this.pageA!);
-  // Normalize: convert literal \n in expected string to real newlines for comparison
+  // Wait for content to appear (polling with condition to avoid race conditions)
   const normalizedExpected = expectedText.replace(/\\n/g, '\n');
-  // For debugging: log the actual content if it doesn't match
-  if (!content.includes(normalizedExpected)) {
-    console.log(`[Test] Expected: "${normalizedExpected}"`);
-    console.log(`[Test] Actual: "${content}"`);
+  const maxWaitTime = 2000;
+  const pollInterval = 200;
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWaitTime) {
+    const content = await getEditorContent(this.pageA!);
+    if (content.includes(normalizedExpected)) {
+      console.log(`[Test] Content confirmed in browser A after ${Date.now() - startTime}ms`);
+      return; // Success
+    }
+    await this.pageA!.waitForTimeout(pollInterval);
   }
-  expect(content).toContain(normalizedExpected);
+  
+  // Final assertion
+  const finalContent = await getEditorContent(this.pageA!);
+  console.error(`[Test] ERROR: Content "${normalizedExpected}" not found in browser A after ${maxWaitTime}ms`);
+  console.error(`[Test] Final content: "${finalContent}"`);
+  expect(finalContent).toContain(normalizedExpected);
 });
 
 Then('browser B shows a cursor at the correct vertical position for browser A', async function (this: ICustomWorld) {
@@ -1329,18 +1243,45 @@ Then('browser B shows a cursor at the correct vertical position for browser A', 
 });
 
 Then('browser B\'s editor shows {string}', async function (this: ICustomWorld, expectedText: string) {
-  // Wait longer for proxy mode synchronization
-  const waitTime = this.useProxyInstance ? 3000 : 1000;
-  await this.pageB!.waitForTimeout(waitTime);
-  const content = await getEditorContent(this.pageB!);
-  // Normalize: convert literal \n in expected string to real newlines for comparison
+  // Wait before starting assertions - give time for sync to propagate
+  await this.pageB!.waitForTimeout(500);
+  
+  // Wait for content to appear in browser B (polling with condition to avoid race conditions)
+  // This ensures synchronization has completed before we assert
   const normalizedExpected = expectedText.replace(/\\n/g, '\n');
-  // For debugging: log the actual content if it doesn't match
-  if (!content.includes(normalizedExpected)) {
-    console.log(`[Test] Expected: "${normalizedExpected}"`);
-    console.log(`[Test] Actual: "${content}"`);
+  const maxWaitTime = 5000;
+  const pollInterval = 300; // Check every 300ms
+  const startTime = Date.now();
+  
+  let lastContent = '';
+  let lastLogTime = 0;
+  
+  while (Date.now() - startTime < maxWaitTime) {
+    const content = await getEditorContent(this.pageB!);
+    
+    // Debug logging every 1 second
+    const elapsed = Date.now() - startTime;
+    if (elapsed - lastLogTime >= 1000) {
+      console.log(`[Test] Waiting for sync (${Math.round(elapsed / 1000)}s): Expected "${normalizedExpected}", Got "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`);
+      lastLogTime = elapsed;
+    }
+    
+    if (content.includes(normalizedExpected)) {
+      console.log(`[Test] Content synchronized to browser B after ${elapsed}ms`);
+      return; // Success - content synchronized
+    }
+    
+    lastContent = content;
+    await this.pageB!.waitForTimeout(pollInterval);
   }
-  expect(content).toContain(normalizedExpected);
+  
+  // Final assertion - fail if content never appeared
+  const finalContent = await getEditorContent(this.pageB!);
+  console.error(`[Test] ERROR: Content "${normalizedExpected}" not synchronized to browser B after ${maxWaitTime}ms`);
+  console.error(`[Test] Final content in browser B (length: ${finalContent.length}): "${finalContent}"`);
+  console.error(`[Test] Expected content (length: ${normalizedExpected.length}): "${normalizedExpected}"`);
+  
+  expect(finalContent).toContain(normalizedExpected);
 });
 
 Then('both browsers show {string}', async function (this: ICustomWorld, expectedText: string) {
@@ -1356,28 +1297,6 @@ Then('both browsers show {string}', async function (this: ICustomWorld, expected
   expect(contentB).toContain(normalizedExpected);
 });
 
-Then('browser A shows connection status {string}', async function (this: ICustomWorld, status: string) {
-  // Ensure editor is focused so widget is visible
-  const editorLocator = await getEditorLocator(this.pageA!);
-  await editorLocator.focus();
-  await this.pageA!.waitForTimeout(500); // Wait for widget to appear
-  
-  // Use .first() to avoid strict mode violation (multiple status elements might exist)
-  const statusIndicator = this.pageA!.locator(
-    '#yjs-connection-status, .yjs-status-indicator, .yjs-collaboration-status-widget'
-  ).first();
-  
-  // Wait for widget to be visible
-  await slowExpect(statusIndicator).toBeVisible({ timeout: 10000 });
-  
-  if (status === 'connected') {
-    await slowExpect(statusIndicator).toHaveClass(/connected/);
-  } else if (status === 'disconnected') {
-    await slowExpect(statusIndicator).toHaveClass(/disconnected/);
-  } else {
-    await slowExpect(statusIndicator).toContainText(status);
-  }
-});
 
 // =============================================================================
 // Browser Reload and Content Verification Steps

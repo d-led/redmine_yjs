@@ -101,7 +101,6 @@ wait_for_services() {
   ELAPSED=0
   
   REDMINE_READY=false
-  REDMINE_PROXY_READY=false
   HOCUSPOCUS_READY=false
   
   while [ $ELAPSED -lt $MAX_WAIT ]; do
@@ -121,16 +120,8 @@ wait_for_services() {
       fi
     fi
     
-    # Check Redmine (proxy mode)
-    if [ "$REDMINE_PROXY_READY" = false ]; then
-      if curl -sf "http://${HOST}:3001/login" | grep -q "username" > /dev/null 2>&1; then
-        REDMINE_PROXY_READY=true
-        log_success "Redmine (proxy) is ready"
-      fi
-    fi
-    
     # Check if all required services are ready
-    if [ "$HOCUSPOCUS_READY" = true ] && [ "$REDMINE_READY" = true ] && [ "$REDMINE_PROXY_READY" = true ]; then
+    if [ "$HOCUSPOCUS_READY" = true ] && [ "$REDMINE_READY" = true ]; then
       log_success "All required services are ready!"
       return 0
     fi
@@ -139,18 +130,16 @@ wait_for_services() {
       log_info "Waiting for services... (${ELAPSED}s elapsed)"
       log_info "  Hocuspocus: $([ "$HOCUSPOCUS_READY" = true ] && echo "✓ ready" || echo "⏳ waiting")"
       log_info "  Redmine (direct): $([ "$REDMINE_READY" = true ] && echo "✓ ready" || echo "⏳ waiting")"
-      log_info "  Redmine (proxy): $([ "$REDMINE_PROXY_READY" = true ] && echo "✓ ready" || echo "⏳ waiting")"
     fi
     
     sleep 5
     ELAPSED=$((ELAPSED + 5))
   done
   
-  if [ "$HOCUSPOCUS_READY" = false ] || [ "$REDMINE_READY" = false ] || [ "$REDMINE_PROXY_READY" = false ]; then
+  if [ "$HOCUSPOCUS_READY" = false ] || [ "$REDMINE_READY" = false ]; then
     log_error "Some services are not ready after ${MAX_WAIT}s"
     log_info "Check status with: docker compose -f docker-compose.test.yml ps"
     log_info "Check logs with: docker compose -f docker-compose.test.yml logs redmine"
-    log_info "Check logs with: docker compose -f docker-compose.test.yml logs redmine-proxy"
     exit 1
   fi
 }

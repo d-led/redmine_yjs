@@ -1,8 +1,0 @@
-# ActionCable configuration for E2E tests
-# This enables WebSocket proxy mode testing
-
-production:
-  adapter: async
-  # Use async adapter for testing (no Redis needed)
-  # In production, you'd use redis:// or postgres://
-
