@@ -6,12 +6,16 @@ cd /usr/src/redmine
 # Create SQLite database config
 if [ "${REDMINE_DB_SQLITE}" = "true" ]; then
   mkdir -p /data/db
+  # Use container name or hostname to ensure unique database per instance
+  DB_NAME="${CONTAINER_NAME:-redmine}"
+  DB_FILE="/data/db/${DB_NAME}.sqlite3"
   cat > config/database.yml << DBCONF
 production:
   adapter: sqlite3
-  database: /data/db/redmine.sqlite3
+  database: ${DB_FILE}
   timeout: 5000
 DBCONF
+  echo "[Test Setup] Using isolated database: ${DB_FILE}"
 fi
 
 # Ensure bundle is set up (in case some dependencies failed during build)

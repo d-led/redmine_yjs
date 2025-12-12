@@ -10,6 +10,7 @@ services:
         condition: service_healthy
     environment:
       REDMINE_DB_SQLITE: "true"
+      CONTAINER_NAME: "redmine_direct"
       RAILS_ENV: production
       REDMINE_ADMIN_PASSWORD: "admin123"
       SECRET_KEY_BASE: test-secret-key-for-e2e-testing
@@ -39,6 +40,7 @@ services:
         condition: service_healthy
     environment:
       REDMINE_DB_SQLITE: "true"
+      CONTAINER_NAME: "redmine_proxy"
       RAILS_ENV: production
       REDMINE_ADMIN_PASSWORD: "admin123"
       SECRET_KEY_BASE: test-secret-key-for-e2e-testing-proxy
@@ -47,7 +49,10 @@ services:
       RAILS_LOG_TO_STDOUT: "true"
       REDMINE_LOAD_DEFAULT_DATA: "true"
       REDMINE_LANG: en
-      HOCUSPOCUS_URL: "ws://0.0.0.0:8081"
+      # In proxy mode, browser connects to Redmine's WebSocket endpoint
+      # Note: This requires a WebSocket proxy middleware (not yet implemented)
+      # For now, proxy mode tests may not work - use direct mode instead
+      HOCUSPOCUS_URL: "ws://0.0.0.0:3001/ws"
       HOCUSPOCUS_INTERNAL_URL: "ws://hocuspocus:8081"
       YJS_ENABLED: "1"
     ports:

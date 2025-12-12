@@ -571,6 +571,10 @@ Then('browser A\'s editor shows {string}', async function (this: ICustomWorld, e
 });
 
 Then('browser B shows a cursor at the correct vertical position for browser A', async function (this: ICustomWorld) {
+  // Ensure browser B's editor is focused so collaboration is active
+  const editorLocatorB = await getEditorLocator(this.pageB!);
+  await editorLocatorB.focus();
+  
   // Wait for cursor to appear and sync
   await this.pageB!.waitForTimeout(2000);
   
@@ -644,10 +648,18 @@ Then('both browsers show {string}', async function (this: ICustomWorld, expected
 });
 
 Then('browser A shows connection status {string}', async function (this: ICustomWorld, status: string) {
+  // Ensure editor is focused so widget is visible
+  const editorLocator = await getEditorLocator(this.pageA!);
+  await editorLocator.focus();
+  await this.pageA!.waitForTimeout(500); // Wait for widget to appear
+  
   // Use .first() to avoid strict mode violation (multiple status elements might exist)
   const statusIndicator = this.pageA!.locator(
     '#yjs-connection-status, .yjs-status-indicator, .yjs-collaboration-status-widget'
   ).first();
+  
+  // Wait for widget to be visible
+  await slowExpect(statusIndicator).toBeVisible({ timeout: 10000 });
   
   if (status === 'connected') {
     await slowExpect(statusIndicator).toHaveClass(/connected/);
