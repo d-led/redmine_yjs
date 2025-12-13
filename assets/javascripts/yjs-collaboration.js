@@ -287,26 +287,39 @@
      */
     scheduleReconnect(provider, documentName) {
       const state = this.providers.get(provider) || { retryCount: 0 };
-      const delay = this.calculateDelay(state.retryCount);
       
-      console.log(`[Yjs] Scheduling reconnect attempt ${state.retryCount + 1} for ${documentName} in ${delay}ms`);
-      
-      // Clear any existing timeout
+      // If there's already a pending reconnection, don't schedule another one
+      // This prevents multiple rapid disconnect events from creating multiple reconnection attempts
       if (state.timeoutId) {
-        clearTimeout(state.timeoutId);
+        console.log(`[Yjs] Reconnection already scheduled for ${documentName}, skipping duplicate`);
+        return state.timeoutId;
       }
+      
+      const delay = this.calculateDelay(state.retryCount);
+      const attemptNumber = state.retryCount + 1;
+      
+      console.log(`[Yjs] Scheduling reconnect attempt ${attemptNumber} for ${documentName} in ${delay}ms`);
       
       // Schedule new reconnect
       const timeoutId = setTimeout(() => {
-        console.log(`[Yjs] Attempting to reconnect to Hocuspocus (attempt ${state.retryCount + 1})...`);
-        updateCollaborationStatusWidget('syncing', `Reconnecting... (attempt ${state.retryCount + 1})`);
+        // Clear the timeout ID since it's now executing
+        const currentState = this.providers.get(provider);
+        if (currentState) {
+          currentState.timeoutId = null;
+        }
+        
+        console.log(`[Yjs] Attempting to reconnect to Hocuspocus (attempt ${attemptNumber})...`);
+        updateCollaborationStatusWidget('syncing', `Reconnecting... (attempt ${attemptNumber})`);
         provider.connect();
       }, delay);
       
-      // Update state
-      state.retryCount++;
+      // Update state BEFORE incrementing retry count
+      // This ensures the delay calculation uses the correct retry count
       state.timeoutId = timeoutId;
       state.documentName = documentName;
+      
+      // Increment retry count AFTER scheduling (for next time)
+      state.retryCount++;
       this.providers.set(provider, state);
       
       return timeoutId;
@@ -1159,13 +1172,51 @@
       const yjsValue = ytext.toString();
       
       if (currentValue !== yjsValue) {
+        // Calculate where the change occurred and adjust cursor only if needed
+        // Find the first difference between old and new value
+        let diffStart = 0;
+        while (diffStart < currentValue.length && 
+               diffStart < yjsValue.length && 
+               currentValue[diffStart] === yjsValue[diffStart]) {
+          diffStart++;
+        }
+        
+        // Find the end of the difference (from the end)
+        let diffEndOld = currentValue.length;
+        let diffEndNew = yjsValue.length;
+        while (diffEndOld > diffStart && 
+               diffEndNew > diffStart && 
+               currentValue[diffEndOld - 1] === yjsValue[diffEndNew - 1]) {
+          diffEndOld--;
+          diffEndNew--;
+        }
+        
+        // Calculate the change: insertion or deletion
+        const insertedLength = diffEndNew - diffStart;
+        const deletedLength = diffEndOld - diffStart;
+        const netChange = insertedLength - deletedLength;
+        
+        // Only adjust cursor if the change happened BEFORE the cursor position
+        // If change is at or after cursor, keep cursor where it is
+        let newCursorPos = currentCursorPos;
+        if (diffStart < currentCursorPos) {
+          // Change happened before cursor - adjust cursor position
+          newCursorPos = currentCursorPos + netChange;
+          newCursorPos = Math.max(0, Math.min(yjsValue.length, newCursorPos));
+        }
+        // If diffStart >= currentCursorPos, cursor stays where it is (change is after cursor)
+        
         textarea.value = yjsValue;
-        // Restore cursor position approximately
-        const lengthDiff = yjsValue.length - currentValue.length;
-        const newCursorPos = Math.max(0, Math.min(yjsValue.length, currentCursorPos + lengthDiff));
         textarea.setSelectionRange(newCursorPos, newCursorPos);
+        lastCursorPosition = newCursorPos; // Update tracked position
         $(textarea).trigger('change');
-        console.debug('[Yjs] 📥 Remote update applied to textarea');
+        console.debug('[Yjs] 📥 Remote update applied to textarea', {
+          diffStart,
+          insertedLength,
+          deletedLength,
+          oldCursor: currentCursorPos,
+          newCursor: newCursorPos
+        });
       }
       
       setTimeout(() => { isUpdating = false; }, 0);
