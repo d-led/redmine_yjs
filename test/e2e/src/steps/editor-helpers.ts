@@ -156,21 +156,33 @@ export async function typeInEditor(page: Page, text: string, position: 'beginnin
 }
 
 /**
+ * Normalize newlines for comparison (handles both literal \n and actual newlines)
+ */
+function normalizeNewlines(text: string): string {
+  // Replace literal \n with actual newlines, then normalize all newlines
+  return text.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+}
+
+/**
  * Wait for content to appear in editor (with polling)
  */
 export async function waitForContent(page: Page, expectedText: string, maxWaitTime: number = 5000): Promise<void> {
   const pollInterval = 200;
   const startTime = Date.now();
+  const normalizedExpected = normalizeNewlines(expectedText);
   
   while (Date.now() - startTime < maxWaitTime) {
     const content = await getEditorContent(page);
-    if (content.includes(expectedText)) {
+    const normalizedContent = normalizeNewlines(content);
+    
+    if (normalizedContent.includes(normalizedExpected)) {
       return;
     }
     await page.waitForTimeout(pollInterval);
   }
   
   const finalContent = await getEditorContent(page);
-  throw new Error(`Content "${expectedText}" not found after ${maxWaitTime}ms. Got: "${finalContent.substring(0, 100)}"`);
+  const normalizedFinal = normalizeNewlines(finalContent);
+  throw new Error(`Content "${normalizedExpected}" not found after ${maxWaitTime}ms. Got: "${normalizedFinal.substring(0, 100)}"`);
 }
 
