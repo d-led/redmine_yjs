@@ -14,9 +14,10 @@ Real-time collaborative editing for Redmine using [Yjs](https://github.com/yjs/y
 
 | Redmine Version | Plugin Version | Status |
 |-----------------|----------------|--------|
-| 6.0.x, 6.1.x    | 1.0.0+         | ✅ Supported |
-| 5.1.x           | 1.0.0+         | ✅ Supported |
-| 5.0.x           | 1.0.0+         | ⚠️ Should work (untested) |
+| 6.0.x           | 1.0.0+         | ✅ Supported (tested) |
+| 6.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
+| 5.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
+| 5.0.x           | 1.0.0+         | ⚠️ Might work (untested) |
 | 4.x and earlier | -              | ❌ Not supported |
 
 ### Requirements
@@ -36,6 +37,7 @@ cd /path/to/redmine/plugins
 git clone https://github.com/your-org/redmine_yjs.git
 
 # Copy assets (Redmine 6.x)
+# Note: In Docker builds, assets are copied automatically during image build
 mkdir -p ../public/plugin_assets/redmine_yjs
 cp -r redmine_yjs/assets/* ../public/plugin_assets/redmine_yjs/
 
@@ -112,7 +114,7 @@ The plugin auto-detects the Hocuspocus URL:
 
 | Environment | URL |
 |-------------|-----|
-| Docker | `ws://0.0.0.0:3000/ws` (via Traefik) |
+| Docker | `ws://localhost:3000/ws` (via Traefik) |
 | Production | `wss://hocuspocus.fly.dev` |
 | Development | `ws://localhost:8081` |
 
@@ -282,7 +284,11 @@ docker logs redmine_hocuspocus
 ```
 redmine_yjs/
 ├── app/
+│   ├── assets/             # Additional assets (if needed)
+│   ├── channels/           # ActionCable channels (if used)
 │   └── views/              # ERB templates for settings
+│       ├── layouts/        # Layout partials
+│       └── settings/       # Settings views
 ├── assets/
 │   ├── javascripts/        # Yjs client-side code
 │   └── stylesheets/        # Collaboration UI styles
@@ -290,17 +296,25 @@ redmine_yjs/
 │   └── locales/            # I18n translations
 ├── hocuspocus/             # Hocuspocus WebSocket server
 │   ├── Dockerfile
+│   ├── Dockerfile.fly
+│   ├── fly-deploy.sh
 │   ├── server.js
 │   └── package.json
 ├── lib/
 │   └── redmine_yjs/        # Ruby modules and patches
 ├── scripts/
-│   └── tag-version.sh      # Version bump script
+│   ├── tag-version.sh      # Version bump script
+│   ├── run_all_tests.sh    # Run all tests
+│   ├── start_test_services.sh
+│   └── stop_test_services.sh
+├── src/
+│   └── deps-entry.js       # Entry point for bundled dependencies
 ├── test/
 │   ├── unit/               # Ruby unit tests
 │   ├── integration/        # Ruby integration tests
 │   └── e2e/                # Playwright/Cucumber tests
 ├── init.rb                 # Plugin registration
+├── package.json            # Node.js dependencies
 └── README.md
 ```
 

@@ -716,8 +716,30 @@ async function typeInEditor(page: Page, text: string, position: 'beginning' | 'e
   
   if (position === 'beginning') {
     await page.keyboard.press('Control+Home');
+    await page.waitForTimeout(100);
   } else if (position === 'end') {
     await page.keyboard.press('Control+End');
+    await page.waitForTimeout(100);
+  } else if (position === 'current') {
+    // For 'current', we need to preserve the cursor position that was set
+    // The cursor should already be set from a previous step, but focus/click might have reset it
+    // So we need to get the current selection and restore it after focus
+    // However, if the cursor was just set, it might still be there
+    // Let's verify the cursor position is where we expect it to be
+    const currentSelection = await textarea.evaluate((el: HTMLTextAreaElement) => {
+      return { start: el.selectionStart, end: el.selectionEnd, value: el.value };
+    }).catch(() => null);
+    
+    if (currentSelection) {
+      // If cursor is at 0 or at the end, it might have been reset - but we can't know the intended position
+      // So we'll just proceed with typing at whatever position the cursor is at
+      // The test should have set the cursor position before calling this
+      console.log(`[typeInEditor] Current cursor position: ${currentSelection.start}, content length: ${currentSelection.value.length}`);
+    }
+    
+    // Don't move the cursor - type at current position
+    // The cursor position should have been set by a previous step
+    await page.waitForTimeout(100); // Brief wait to ensure cursor is stable
   }
   
   // Handle newlines: replace \n (literal backslash-n from Gherkin) with Enter key presses
@@ -803,7 +825,8 @@ When('user types {string} in browser A\'s editor', async function (this: ICustom
   // Normalize newlines: Gherkin passes \n as literal string, but we need actual newlines for comparison
   const normalizedText = text.replace(/\\n/g, '\n');
   
-  await typeInEditor(this.pageA!, normalizedText, 'end');
+  // Use 'current' position to respect cursor position that may have been set
+  await typeInEditor(this.pageA!, normalizedText, 'current');
   
   // Wait for content to appear in the editor (polling with condition to avoid race conditions)
   // This ensures the typing actually happened before we proceed
@@ -845,6 +868,10 @@ When('user types {string} at the end in browser B\'s editor', async function (th
 });
 
 When('user sets cursor to position {int} in browser A\'s editor', async function (this: ICustomWorld, position: number) {
+  // Wait for Yjs collaboration to be fully synced and stable
+  // This prevents cursor position from being moved by awareness updates from other browsers
+  await this.pageA!.waitForTimeout(1000);
+  
   // Set cursor position in textarea, ClassicEditor, or CKEditor
   const textarea = this.pageA!.locator(
     'textarea[id*="description"], textarea[id*="notes"], textarea[id*="content"]'
@@ -973,6 +1000,55 @@ When('user sets cursor to position {int} in browser A\'s editor', async function
       el.setSelectionRange(pos, pos);
       el.dispatchEvent(new Event('click', { bubbles: true }));
     }, position);
+    
+    // Wait and verify the cursor position is actually set (race condition fix)
+    // Also wait for any Yjs awareness updates to complete that might move the cursor
+    await this.pageA!.waitForTimeout(500);
+    
+    // Poll to verify cursor position is stable and not being moved by collaboration
+    const maxWait = 3000;
+    const pollInterval = 150;
+    const startTime = Date.now();
+    let stableCount = 0;
+    const requiredStableChecks = 3; // Cursor must be stable for 3 consecutive checks
+    
+    while (Date.now() - startTime < maxWait) {
+      const actualPosition = await textarea.evaluate((el: HTMLTextAreaElement) => {
+        return el.selectionStart;
+      }).catch(() => null);
+      
+      if (actualPosition === position) {
+        stableCount++;
+        if (stableCount >= requiredStableChecks) {
+          // Cursor position is correct and stable (not being moved by collaboration)
+          console.log(`[Collab] Set cursor to position ${position} in browser A (verified and stable after ${stableCount} checks)`);
+          return; // Success - cursor is at correct position and stable
+        }
+      } else {
+        // Cursor position changed (likely due to collaboration awareness updates)
+        stableCount = 0;
+        console.log(`[Collab] Cursor position changed from ${position} to ${actualPosition}, resetting...`);
+        
+        // Reset cursor position
+        await textarea.evaluate((el: HTMLTextAreaElement, pos: number) => {
+          el.focus();
+          el.setSelectionRange(pos, pos);
+        }, position);
+      }
+      
+      await this.pageA!.waitForTimeout(pollInterval);
+    }
+    
+    // Final verification
+    const finalPosition = await textarea.evaluate((el: HTMLTextAreaElement) => {
+      return el.selectionStart;
+    }).catch(() => null);
+    
+    if (finalPosition !== position) {
+      console.error(`[Collab] WARNING: Failed to set cursor position: expected ${position}, got ${finalPosition} (may be affected by collaboration)`);
+    } else {
+      console.log(`[Collab] Set cursor to position ${position} in browser A (final verification: ${finalPosition})`);
+    }
   }
   
   // Wait for cursor position to sync
