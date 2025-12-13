@@ -1161,62 +1161,32 @@
 
     // Update textarea when Yjs changes from remote peers
     // See: https://docs.yjs.dev/api/document-updates
+    // CRDTs handle content merging automatically - we should not interfere with cursor positions
+    // Cursor positions are communicated via awareness, not inferred from content changes
     ytext.observe((event, transaction) => {
       // Skip if this is our own local change (prevents echo loop)
       if (transaction.origin === LOCAL_ORIGIN) return;
       if (isUpdating) return;
       
       isUpdating = true;
-      const currentCursorPos = textarea.selectionStart;
       const currentValue = textarea.value;
       const yjsValue = ytext.toString();
       
       if (currentValue !== yjsValue) {
-        // Calculate where the change occurred and adjust cursor only if needed
-        // Find the first difference between old and new value
-        let diffStart = 0;
-        while (diffStart < currentValue.length && 
-               diffStart < yjsValue.length && 
-               currentValue[diffStart] === yjsValue[diffStart]) {
-          diffStart++;
-        }
-        
-        // Find the end of the difference (from the end)
-        let diffEndOld = currentValue.length;
-        let diffEndNew = yjsValue.length;
-        while (diffEndOld > diffStart && 
-               diffEndNew > diffStart && 
-               currentValue[diffEndOld - 1] === yjsValue[diffEndNew - 1]) {
-          diffEndOld--;
-          diffEndNew--;
-        }
-        
-        // Calculate the change: insertion or deletion
-        const insertedLength = diffEndNew - diffStart;
-        const deletedLength = diffEndOld - diffStart;
-        const netChange = insertedLength - deletedLength;
-        
-        // Only adjust cursor if the change happened BEFORE the cursor position
-        // If change is at or after cursor, keep cursor where it is
-        let newCursorPos = currentCursorPos;
-        if (diffStart < currentCursorPos) {
-          // Change happened before cursor - adjust cursor position
-          newCursorPos = currentCursorPos + netChange;
-          newCursorPos = Math.max(0, Math.min(yjsValue.length, newCursorPos));
-        }
-        // If diffStart >= currentCursorPos, cursor stays where it is (change is after cursor)
-        
+        // Simply update the content - let Yjs CRDT handle merging
+        // The browser will preserve cursor position naturally
+        // We don't manually adjust cursors here - that's what awareness is for
+        const currentCursorPos = textarea.selectionStart;
         textarea.value = yjsValue;
-        textarea.setSelectionRange(newCursorPos, newCursorPos);
-        lastCursorPosition = newCursorPos; // Update tracked position
+        
+        // Only clamp cursor if it's beyond the new content length
+        // This is a safety measure, not cursor adjustment logic
+        if (currentCursorPos > yjsValue.length) {
+          textarea.setSelectionRange(yjsValue.length, yjsValue.length);
+        }
+        // Otherwise, let the browser preserve the cursor position naturally
+        
         $(textarea).trigger('change');
-        console.debug('[Yjs] 📥 Remote update applied to textarea', {
-          diffStart,
-          insertedLength,
-          deletedLength,
-          oldCursor: currentCursorPos,
-          newCursor: newCursorPos
-        });
       }
       
       setTimeout(() => { isUpdating = false; }, 0);

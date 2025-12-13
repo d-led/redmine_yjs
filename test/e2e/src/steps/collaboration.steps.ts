@@ -6,6 +6,7 @@ import { Given, When, Then } from '@cucumber/cucumber';
 import { expect, Page, Locator } from '@playwright/test';
 import { ICustomWorld } from '../support/custom-world';
 import { config } from '../support/config';
+import { getEditorContent, typeInEditor, waitForContent, getEditorLocator } from './editor-helpers';
 
 const slowExpect = expect.configure({ timeout: 15000 });
 
@@ -349,414 +350,6 @@ async function openWikiEdit(page: Page, projectId: string, pageName: string, wor
   await page.waitForTimeout(3000);
 }
 
-/**
- * Get the main editor element (textarea)
- */
-function getEditorLocator(page: Page) {
-  // Try multiple selectors - Redmine uses different IDs for different contexts
-  return page.locator(
-    'textarea#issue_description, ' +
-    'textarea[name="issue[description]"], ' +
-    'textarea[id*="description"], ' +
-    'textarea#issue_notes, ' +
-    'textarea[name="issue[notes]"], ' +
-    'textarea[id*="notes"], ' +
-    'textarea#content, ' +
-    'textarea[name="content"], ' +
-    'textarea[id*="content"]'
-  ).first();
-}
-
-/**
- * Get editor content (works for textarea, ClassicEditor, and CKEditor)
- */
-async function getEditorContent(page: Page): Promise<string> {
-  const textarea = getEditorLocator(page);
-  const textareaId = await textarea.getAttribute('id').catch(() => null);
-  const textareaName = await textarea.getAttribute('name').catch(() => null);
-  
-  // Debug: log what we found
-  if (!textareaId && !textareaName) {
-    const allTextareas = await page.locator('textarea').all();
-    console.log(`[getEditorContent] Found ${allTextareas.length} textareas on page`);
-    for (let i = 0; i < Math.min(allTextareas.length, 3); i++) {
-      const id = await allTextareas[i].getAttribute('id').catch(() => 'no-id');
-      const name = await allTextareas[i].getAttribute('name').catch(() => 'no-name');
-      const value = await allTextareas[i].inputValue().catch(() => 'no-value');
-      console.log(`[getEditorContent] Textarea ${i}: id="${id}", name="${name}", value="${value.substring(0, 50)}..."`);
-    }
-  }
-  
-  if (!textareaId) {
-    const value = await textarea.inputValue().catch(() => '');
-    console.log(`[getEditorContent] No textarea ID, using inputValue: "${value.substring(0, 100)}..."`);
-    return value;
-  }
-  
-  // Check if ClassicEditor or CKEditor is being used
-  const editorInfo = await page.evaluate((id: string) => {
-    // Check for ClassicEditor (CKEditor 5)
-    const classicEditor = (window as any).ClassicEditor;
-    if (typeof classicEditor !== 'undefined') {
-      const element = document.querySelector(`#${id}`);
-      if (element) {
-        const editorRoot = element.closest('.ck-editor') || element.parentElement;
-        if (editorRoot) {
-          const editable = editorRoot.querySelector('.ck-editor__editable') as HTMLElement;
-          if (editable) {
-            return { type: 'classic', found: true, content: editable.textContent || editable.innerText || '' };
-          }
-        }
-      }
-    }
-    
-    // Check for CKEditor (CKEditor 3/4)
-    const ckeditor = (window as any).CKEDITOR;
-    if (typeof ckeditor !== 'undefined' && 
-        ckeditor.instances && 
-        ckeditor.instances[id] !== undefined) {
-      const editor = ckeditor.instances[id];
-      return { type: 'ckeditor', found: true, content: editor.getData() || '' };
-    }
-    
-    return { type: null, found: false, content: '' };
-  }, textareaId).catch(() => ({ type: null, found: false, content: '' }));
-  
-  // If ClassicEditor or CKEditor found, return their content
-  if (editorInfo.found && editorInfo.content !== undefined) {
-    console.log(`[getEditorContent] Found ${editorInfo.type} editor, content: "${editorInfo.content.substring(0, 100)}..."`);
-    return editorInfo.content;
-  }
-  
-  // Fallback to textarea value (should work for all editors as they sync back to textarea)
-  const value = await textarea.inputValue().catch(() => '');
-  console.log(`[getEditorContent] Using textarea inputValue (id="${textareaId}"): "${value.substring(0, 100)}..."`);
-  return value;
-}
-
-/**
- * Type into the editor (textarea or CKEditor)
- */
-async function typeInEditor(page: Page, text: string, position: 'beginning' | 'end' | 'current' = 'current'): Promise<void> {
-  const textarea = getEditorLocator(page);
-  
-  // Wait for the textarea to be attached to DOM first
-  await textarea.waitFor({ state: 'attached', timeout: 30000 });
-  
-  // Debug: log what we found
-  const count = await textarea.count();
-  if (count === 0) {
-    // Try to find any textarea on the page for debugging
-    const allTextareas = await page.locator('textarea').all();
-    console.error(`[typeInEditor] Textarea not found! Found ${allTextareas.length} textareas on page`);
-    for (let i = 0; i < Math.min(allTextareas.length, 5); i++) {
-      const id = await allTextareas[i].getAttribute('id').catch(() => 'no-id');
-      const name = await allTextareas[i].getAttribute('name').catch(() => 'no-name');
-      console.error(`[typeInEditor] Textarea ${i}: id="${id}", name="${name}"`);
-    }
-    throw new Error('Textarea editor not found on page');
-  }
-  
-  // Check if ClassicEditor (CKEditor 5) or CKEditor (CKEditor 3/4) is being used for this textarea
-  const textareaId = await textarea.getAttribute('id').catch(() => null);
-  const editorInfo = await page.evaluate((id: string | null) => {
-    if (!id) return { type: null, found: false };
-    
-    // Check for ClassicEditor (CKEditor 5)
-    const classicEditor = (window as any).ClassicEditor;
-    if (typeof classicEditor !== 'undefined') {
-      const element = document.querySelector(`#${id}`);
-      if (element) {
-        const editorRoot = element.closest('.ck-editor') || element.parentElement;
-        if (editorRoot) {
-          const editable = editorRoot.querySelector('.ck-editor__editable');
-          if (editable) {
-            return { type: 'classic', found: true, element: id };
-          }
-        }
-      }
-    }
-    
-    // Check for CKEditor (CKEditor 3/4)
-    const ckeditor = (window as any).CKEDITOR;
-    if (typeof ckeditor !== 'undefined' && 
-        ckeditor.instances && 
-        ckeditor.instances[id] !== undefined) {
-      return { type: 'ckeditor', found: true, element: id };
-    }
-    
-    return { type: null, found: false };
-  }, textareaId).catch(() => ({ type: null, found: false }));
-  
-  if (editorInfo.found && textareaId) {
-    if (editorInfo.type === 'classic') {
-      console.log(`[typeInEditor] ClassicEditor (CKEditor 5) detected for textarea ${textareaId}, focusing and typing into ClassicEditor`);
-      
-      // Focus ClassicEditor using its API
-      // According to CKEditor 5 docs: https://ckeditor.com/docs/ckeditor5/latest/framework/deep-dive/ui/focus-tracking.html
-      await page.evaluate((id: string) => {
-        const element = document.querySelector(`#${id}`);
-        if (!element) return;
-        const editorRoot = element.closest('.ck-editor') || element.parentElement;
-        if (!editorRoot) return;
-        const editable = editorRoot.querySelector('.ck-editor__editable') as HTMLElement;
-        if (!editable) return;
-        
-        // Try multiple methods to get the editor instance and focus it
-        let editor = null;
-        
-        // Method 1: Check if editor instance is stored on the element
-        if ((editable as any).ckeditorInstance) {
-          editor = (editable as any).ckeditorInstance;
-        }
-        // Method 2: Check parent elements
-        else if ((editorRoot as any).ckeditorInstance) {
-          editor = (editorRoot as any).ckeditorInstance;
-        }
-        // Method 3: Check global registry
-        else if ((window as any).ckeditorInstances && (window as any).ckeditorInstances[id]) {
-          editor = (window as any).ckeditorInstances[id];
-        }
-        // Method 4: Try ClassicEditor's internal registry
-        else {
-          const classicEditor = (window as any).ClassicEditor;
-          if (classicEditor && classicEditor.instances) {
-            try {
-              for (const [key, instance] of classicEditor.instances.entries()) {
-                if (instance.sourceElement === element || instance.sourceElement?.id === id) {
-                  editor = instance;
-                  break;
-                }
-              }
-            } catch (e) {
-              // Instances might not be directly accessible
-            }
-          }
-        }
-        
-        // Use proper CKEditor 5 focus API if available
-        if (editor && typeof editor.focus === 'function') {
-          editor.focus();
-        } else if (editor && editor.editing && editor.editing.view && typeof editor.editing.view.focus === 'function') {
-          editor.editing.view.focus();
-        } else {
-          // Fallback: focus the editable element directly
-          editable.focus();
-          editable.click();
-          editable.dispatchEvent(new FocusEvent('focus', { bubbles: true }));
-          editable.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        }
-      }, textareaId);
-      
-      await page.waitForTimeout(300); // Give time for focus to be established
-      
-      // Move cursor to position if needed (for ClassicEditor, we can use selection API)
-      if (position === 'beginning') {
-        await page.evaluate((id: string) => {
-          const element = document.querySelector(`#${id}`);
-          if (!element) return;
-          const editorRoot = element.closest('.ck-editor') || element.parentElement;
-          if (!editorRoot) return;
-          const editable = editorRoot.querySelector('.ck-editor__editable') as HTMLElement;
-          if (editable) {
-            const range = document.createRange();
-            range.selectNodeContents(editable);
-            range.collapse(true); // true = collapse to start
-            const selection = window.getSelection();
-            if (selection) {
-              selection.removeAllRanges();
-              selection.addRange(range);
-            }
-          }
-        }, textareaId);
-      } else if (position === 'end') {
-        await page.evaluate((id: string) => {
-          const element = document.querySelector(`#${id}`);
-          if (!element) return;
-          const editorRoot = element.closest('.ck-editor') || element.parentElement;
-          if (!editorRoot) return;
-          const editable = editorRoot.querySelector('.ck-editor__editable') as HTMLElement;
-          if (editable) {
-            const range = document.createRange();
-            range.selectNodeContents(editable);
-            range.collapse(false); // false = collapse to end
-            const selection = window.getSelection();
-            if (selection) {
-              selection.removeAllRanges();
-              selection.addRange(range);
-            }
-          }
-        }, textareaId);
-      }
-      
-      // Type into ClassicEditor - keyboard events should work if ClassicEditor is focused
-      // Handle newlines: replace \n (literal backslash-n from Gherkin) with Enter key presses
-      const parts = text.split(/\\n|\n/);
-      for (let i = 0; i < parts.length; i++) {
-        if (i > 0) {
-          // Press Enter to create a newline (not before first part)
-          await page.keyboard.press('Enter');
-        }
-        if (parts[i]) {
-          // Type the text part (only if non-empty)
-          await page.keyboard.type(parts[i], { delay: 50 });
-        }
-      }
-      
-      return;
-    } else if (editorInfo.type === 'ckeditor') {
-      console.log(`[typeInEditor] CKEditor (3/4) detected for textarea ${textareaId}, focusing and typing into CKEditor`);
-      
-      // Focus CKEditor using its API
-      await page.evaluate((id: string) => {
-        const ckeditor = (window as any).CKEDITOR;
-        const editor = ckeditor?.instances?.[id];
-        if (editor) {
-          editor.focus();
-          const editable = editor.editable();
-          if (editable && editable.$) {
-            editable.$.focus();
-            // Click to ensure focus
-            editable.$.click();
-          }
-        }
-      }, textareaId);
-      
-      await page.waitForTimeout(300); // Give time for focus to be established
-      
-      // Move cursor to position if needed
-      if (position === 'beginning') {
-        await page.evaluate((id: string) => {
-          const ckeditor = (window as any).CKEDITOR;
-          const editor = ckeditor?.instances?.[id];
-          if (editor) {
-            const range = editor.createRange();
-            range.moveToElementEditablePosition(editor.editable(), true); // true = start
-            editor.getSelection().selectRanges([range]);
-          }
-        }, textareaId);
-      } else if (position === 'end') {
-        await page.evaluate((id: string) => {
-          const ckeditor = (window as any).CKEDITOR;
-          const editor = ckeditor?.instances?.[id];
-          if (editor) {
-            const range = editor.createRange();
-            range.moveToElementEditablePosition(editor.editable(), false); // false = end
-            editor.getSelection().selectRanges([range]);
-          }
-        }, textareaId);
-      }
-      
-      // Type into CKEditor - keyboard events should work if CKEditor is focused
-      // Handle newlines: replace \n (literal backslash-n from Gherkin) with Enter key presses
-      const parts = text.split(/\\n|\n/);
-      for (let i = 0; i < parts.length; i++) {
-        if (i > 0) {
-          // Press Enter to create a newline (not before first part)
-          await page.keyboard.press('Enter');
-        }
-        if (parts[i]) {
-          // Type the text part (only if non-empty)
-          await page.keyboard.type(parts[i], { delay: 50 });
-        }
-      }
-      
-      return;
-    }
-  }
-  
-  // Fallback to textarea typing logic (for plain text editors)
-  // Use JavaScript to interact with the textarea directly - more reliable than Playwright's visibility checks
-  await textarea.evaluate((el: HTMLTextAreaElement) => {
-    // Remove any hiding styles
-    el.style.display = 'block';
-    el.style.visibility = 'visible';
-    el.style.opacity = '1';
-    el.style.height = 'auto';
-    el.style.minHeight = '100px';
-    
-    // Expand any collapsed parent containers
-    let parent = el.parentElement;
-    while (parent && parent !== document.body) {
-      if (parent.style.display === 'none') {
-        parent.style.display = 'block';
-      }
-      if (parent.classList.contains('collapsed')) {
-        parent.classList.remove('collapsed');
-      }
-      // Check for common Redmine collapsible patterns
-      const toggle = parent.querySelector('.toggle, a.toggle');
-      if (toggle && toggle.getAttribute('aria-expanded') === 'false') {
-        toggle.setAttribute('aria-expanded', 'true');
-      }
-      parent = parent.parentElement;
-    }
-    
-    // Scroll into view
-    el.scrollIntoView({ block: 'center', behavior: 'instant' });
-    
-    // Focus
-    el.focus();
-    el.click();
-  });
-  
-  // Wait a bit for focus to be established
-  await page.waitForTimeout(200);
-  
-  // Verify we can interact with it
-  const isFocused = await textarea.evaluate((el: HTMLTextAreaElement) => {
-    return document.activeElement === el;
-  }).catch(() => false);
-  
-  if (!isFocused) {
-    // Try one more time to focus
-    await textarea.focus();
-    await page.waitForTimeout(100);
-  }
-  
-  if (position === 'beginning') {
-    await page.keyboard.press('Control+Home');
-    await page.waitForTimeout(100);
-  } else if (position === 'end') {
-    await page.keyboard.press('Control+End');
-    await page.waitForTimeout(100);
-  } else if (position === 'current') {
-    // For 'current', we need to preserve the cursor position that was set
-    // The cursor should already be set from a previous step, but focus/click might have reset it
-    // So we need to get the current selection and restore it after focus
-    // However, if the cursor was just set, it might still be there
-    // Let's verify the cursor position is where we expect it to be
-    const currentSelection = await textarea.evaluate((el: HTMLTextAreaElement) => {
-      return { start: el.selectionStart, end: el.selectionEnd, value: el.value };
-    }).catch(() => null);
-    
-    if (currentSelection) {
-      // If cursor is at 0 or at the end, it might have been reset - but we can't know the intended position
-      // So we'll just proceed with typing at whatever position the cursor is at
-      // The test should have set the cursor position before calling this
-      console.log(`[typeInEditor] Current cursor position: ${currentSelection.start}, content length: ${currentSelection.value.length}`);
-    }
-    
-    // Don't move the cursor - type at current position
-    // The cursor position should have been set by a previous step
-    await page.waitForTimeout(100); // Brief wait to ensure cursor is stable
-  }
-  
-  // Handle newlines: replace \n (literal backslash-n from Gherkin) with Enter key presses
-  // Also handle actual newline characters if present
-  // Split by literal \n string or actual newline, and type each part with Enter between them
-  const parts = text.split(/\\n|\n/);
-  for (let i = 0; i < parts.length; i++) {
-    if (i > 0) {
-      // Press Enter to create a newline (not before first part)
-      await page.keyboard.press('Enter');
-    }
-    if (parts[i]) {
-      // Type the text part (only if non-empty)
-      await page.keyboard.type(parts[i], { delay: 50 });
-    }
-  }
-}
 
 // =============================================================================
 // Given Steps
@@ -820,40 +413,13 @@ Given('user {string} opens the same wiki page edit in browser B', { timeout: 300
 // =============================================================================
 
 When('user types {string} in browser A\'s editor', async function (this: ICustomWorld, text: string) {
-  console.log(`[Test] Typing "${text}" in browser A's editor`);
-  
-  // Normalize newlines: Gherkin passes \n as literal string, but we need actual newlines for comparison
   const normalizedText = text.replace(/\\n/g, '\n');
-  
-  // Use 'current' position to respect cursor position that may have been set
   await typeInEditor(this.pageA!, normalizedText, 'current');
-  
-  // Wait for content to appear in the editor (polling with condition to avoid race conditions)
-  // This ensures the typing actually happened before we proceed
-  const maxWaitTime = 2000;
-  const pollInterval = 200;
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < maxWaitTime) {
-    const content = await getEditorContent(this.pageA!);
-    // Compare with normalized text (actual newlines)
-    if (content.includes(normalizedText)) {
-      console.log(`[Test] Content "${normalizedText}" confirmed in browser A after ${Date.now() - startTime}ms`);
-      return; // Success - content typed and confirmed
-    }
-    await this.pageA!.waitForTimeout(pollInterval);
-  }
-  
-  // Final check - fail if content wasn't typed
-  const finalContent = await getEditorContent(this.pageA!);
-  console.error(`[Test] ERROR: Typed text "${normalizedText}" not found in editor after ${maxWaitTime}ms`);
-  console.error(`[Test] Final content: "${finalContent}"`);
-  expect(finalContent).toContain(normalizedText);
+  await waitForContent(this.pageA!, normalizedText, 2000);
 });
 
 When('user types {string} in browser B\'s editor', async function (this: ICustomWorld, text: string) {
   await typeInEditor(this.pageB!, text, 'end');
-  // Wait for sync
   await this.pageB!.waitForTimeout(500);
 });
 
@@ -997,63 +563,13 @@ When('user sets cursor to position {int} in browser A\'s editor', async function
     // Plain text editor - set selection range
     await textarea.evaluate((el: HTMLTextAreaElement, pos: number) => {
       el.focus();
-      el.setSelectionRange(pos, pos);
-      el.dispatchEvent(new Event('click', { bubbles: true }));
+      const maxPos = Math.min(pos, el.value.length);
+      el.setSelectionRange(maxPos, maxPos);
     }, position);
-    
-    // Wait and verify the cursor position is actually set (race condition fix)
-    // Also wait for any Yjs awareness updates to complete that might move the cursor
-    await this.pageA!.waitForTimeout(500);
-    
-    // Poll to verify cursor position is stable and not being moved by collaboration
-    const maxWait = 3000;
-    const pollInterval = 150;
-    const startTime = Date.now();
-    let stableCount = 0;
-    const requiredStableChecks = 3; // Cursor must be stable for 3 consecutive checks
-    
-    while (Date.now() - startTime < maxWait) {
-      const actualPosition = await textarea.evaluate((el: HTMLTextAreaElement) => {
-        return el.selectionStart;
-      }).catch(() => null);
-      
-      if (actualPosition === position) {
-        stableCount++;
-        if (stableCount >= requiredStableChecks) {
-          // Cursor position is correct and stable (not being moved by collaboration)
-          console.log(`[Collab] Set cursor to position ${position} in browser A (verified and stable after ${stableCount} checks)`);
-          return; // Success - cursor is at correct position and stable
-        }
-      } else {
-        // Cursor position changed (likely due to collaboration awareness updates)
-        stableCount = 0;
-        console.log(`[Collab] Cursor position changed from ${position} to ${actualPosition}, resetting...`);
-        
-        // Reset cursor position
-        await textarea.evaluate((el: HTMLTextAreaElement, pos: number) => {
-          el.focus();
-          el.setSelectionRange(pos, pos);
-        }, position);
-      }
-      
-      await this.pageA!.waitForTimeout(pollInterval);
-    }
-    
-    // Final verification
-    const finalPosition = await textarea.evaluate((el: HTMLTextAreaElement) => {
-      return el.selectionStart;
-    }).catch(() => null);
-    
-    if (finalPosition !== position) {
-      console.error(`[Collab] WARNING: Failed to set cursor position: expected ${position}, got ${finalPosition} (may be affected by collaboration)`);
-    } else {
-      console.log(`[Collab] Set cursor to position ${position} in browser A (final verification: ${finalPosition})`);
-    }
   }
   
-  // Wait for cursor position to sync
+  // Wait for cursor position to be set and awareness to sync
   await this.pageA!.waitForTimeout(500);
-  console.log(`[Collab] Set cursor to position ${position} in browser A`);
 });
 
 
@@ -1236,26 +752,8 @@ Then('browser B shows {int} other editor(s) connected', async function (this: IC
 });
 
 Then('browser A\'s editor shows {string}', async function (this: ICustomWorld, expectedText: string) {
-  // Wait for content to appear (polling with condition to avoid race conditions)
   const normalizedExpected = expectedText.replace(/\\n/g, '\n');
-  const maxWaitTime = 2000;
-  const pollInterval = 200;
-  const startTime = Date.now();
-  
-  while (Date.now() - startTime < maxWaitTime) {
-    const content = await getEditorContent(this.pageA!);
-    if (content.includes(normalizedExpected)) {
-      console.log(`[Test] Content confirmed in browser A after ${Date.now() - startTime}ms`);
-      return; // Success
-    }
-    await this.pageA!.waitForTimeout(pollInterval);
-  }
-  
-  // Final assertion
-  const finalContent = await getEditorContent(this.pageA!);
-  console.error(`[Test] ERROR: Content "${normalizedExpected}" not found in browser A after ${maxWaitTime}ms`);
-  console.error(`[Test] Final content: "${finalContent}"`);
-  expect(finalContent).toContain(normalizedExpected);
+  await waitForContent(this.pageA!, normalizedExpected, 2000);
 });
 
 Then('browser B shows a cursor at the correct vertical position for browser A', async function (this: ICustomWorld) {
@@ -1319,45 +817,9 @@ Then('browser B shows a cursor at the correct vertical position for browser A', 
 });
 
 Then('browser B\'s editor shows {string}', async function (this: ICustomWorld, expectedText: string) {
-  // Wait before starting assertions - give time for sync to propagate
   await this.pageB!.waitForTimeout(500);
-  
-  // Wait for content to appear in browser B (polling with condition to avoid race conditions)
-  // This ensures synchronization has completed before we assert
   const normalizedExpected = expectedText.replace(/\\n/g, '\n');
-  const maxWaitTime = 5000;
-  const pollInterval = 300; // Check every 300ms
-  const startTime = Date.now();
-  
-  let lastContent = '';
-  let lastLogTime = 0;
-  
-  while (Date.now() - startTime < maxWaitTime) {
-    const content = await getEditorContent(this.pageB!);
-    
-    // Debug logging every 1 second
-    const elapsed = Date.now() - startTime;
-    if (elapsed - lastLogTime >= 1000) {
-      console.log(`[Test] Waiting for sync (${Math.round(elapsed / 1000)}s): Expected "${normalizedExpected}", Got "${content.substring(0, 100)}${content.length > 100 ? '...' : ''}"`);
-      lastLogTime = elapsed;
-    }
-    
-    if (content.includes(normalizedExpected)) {
-      console.log(`[Test] Content synchronized to browser B after ${elapsed}ms`);
-      return; // Success - content synchronized
-    }
-    
-    lastContent = content;
-    await this.pageB!.waitForTimeout(pollInterval);
-  }
-  
-  // Final assertion - fail if content never appeared
-  const finalContent = await getEditorContent(this.pageB!);
-  console.error(`[Test] ERROR: Content "${normalizedExpected}" not synchronized to browser B after ${maxWaitTime}ms`);
-  console.error(`[Test] Final content in browser B (length: ${finalContent.length}): "${finalContent}"`);
-  console.error(`[Test] Expected content (length: ${normalizedExpected.length}): "${normalizedExpected}"`);
-  
-  expect(finalContent).toContain(normalizedExpected);
+  await waitForContent(this.pageB!, normalizedExpected, 5000);
 });
 
 Then('both browsers show {string}', async function (this: ICustomWorld, expectedText: string) {
@@ -1506,38 +968,26 @@ When('browser A reloads the page', async function (this: ICustomWorld) {
 Then('browser A\'s editor shows exactly {string}', async function (this: ICustomWorld, expectedText: string) {
   await this.pageA!.waitForTimeout(1000);
   const content = await getEditorContent(this.pageA!);
-  const trimmedContent = content.trim();
-  // Normalize: convert literal \n in expected string to real newlines for comparison
   const normalizedExpected = expectedText.replace(/\\n/g, '\n');
-  
-  expect(trimmedContent).toBe(normalizedExpected);
-  console.log(`[Collab] Browser A content verified: "${trimmedContent}"`);
+  expect(content.trim()).toBe(normalizedExpected);
 });
 
 Then('browser B\'s editor shows exactly {string}', async function (this: ICustomWorld, expectedText: string) {
   await this.pageB!.waitForTimeout(1000);
   const content = await getEditorContent(this.pageB!);
-  const trimmedContent = content.trim();
-  // Normalize: convert literal \n in expected string to real newlines for comparison
   const normalizedExpected = expectedText.replace(/\\n/g, '\n');
-  
-  expect(trimmedContent).toBe(normalizedExpected);
-  console.log(`[Collab] Browser B content verified: "${trimmedContent}"`);
+  expect(content.trim()).toBe(normalizedExpected);
 });
 
 Then('browser A\'s editor does not show {string}', async function (this: ICustomWorld, unexpectedText: string) {
   await this.pageA!.waitForTimeout(500);
   const content = await getEditorContent(this.pageA!);
-  
   expect(content).not.toContain(unexpectedText);
-  console.log(`[Collab] Browser A verified NOT containing: "${unexpectedText}"`);
 });
 
 Then('browser B\'s editor does not show {string}', async function (this: ICustomWorld, unexpectedText: string) {
   await this.pageB!.waitForTimeout(500);
   const content = await getEditorContent(this.pageB!);
-  
   expect(content).not.toContain(unexpectedText);
-  console.log(`[Collab] Browser B verified NOT containing: "${unexpectedText}"`);
 });
 
