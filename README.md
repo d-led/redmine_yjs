@@ -16,13 +16,13 @@ This plugin addresses a long-standing feature request for real-time collaborativ
 
 ## Compatibility
 
-| Redmine Version | Plugin Version | Status                   |
-| --------------- | -------------- | ------------------------ |
-| 6.0.x           | 1.0.0+         | ✅ Supported (tested)    |
-| 6.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
-| 5.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
-| 5.0.x           | 1.0.0+         | ⚠️ Might work (untested) |
-| 4.x and earlier | -              | ❌ Not supported         |
+| Redmine Version | Plugin Version | Status                             |
+|-----------------|----------------|------------------------------------|
+| 6.0.x           | 1.0.0+         | ✅ Supported (tested)               |
+| 6.1.x           | 1.0.0+         | ⚠️ Might work (sporadically tested) |
+| 5.1.x           | 1.0.0+         | ⚠️ Might work (sporadically tested) |
+| 5.0.x           | 1.0.0+         | ⚠️ Might work (sporadically tested) |
+| 4.x and earlier | -              | ❌ Not supported                    |
 
 ## Prerequisites
 
