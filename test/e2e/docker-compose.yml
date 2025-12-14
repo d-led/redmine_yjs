@@ -4,6 +4,8 @@ services:
     build:
       context: ../..  # Plugin root directory
       dockerfile: test/e2e/Dockerfile.redmine
+      args:
+        REDMINE_TAG: ${REDMINE_TAG:-6.0}
     container_name: redmine_yjs_test_app
     depends_on:
       hocuspocus:
@@ -47,3 +49,4 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+

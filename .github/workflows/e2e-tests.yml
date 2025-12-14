@@ -21,15 +21,37 @@ on:
         required: false
         default: 'false'
         type: boolean
+      full:
+        description: 'Run full test matrix (all Redmine/Ruby versions)'
+        required: false
+        default: 'false'
+        type: boolean
 
 env:
   HOST: '127.0.0.1'
 
 jobs:
   e2e-tests:
-    name: Playwright E2E Tests
+    name: E2E Tests - Redmine ${{ matrix.redmine_tag }} (Ruby ${{ matrix.ruby_version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        ${{ (github.event.inputs.full == 'true') && fromJSON('{
+          "include": [
+            {"redmine_tag": "7.0", "ruby_version": "3.2"},
+            {"redmine_tag": "6.1", "ruby_version": "3.1"},
+            {"redmine_tag": "6.0", "ruby_version": "3.0"},
+            {"redmine_tag": "5.1", "ruby_version": "2.7"},
+            {"redmine_tag": "5.0", "ruby_version": "2.7"}
+          ]
+        }') || fromJSON('{
+          "include": [
+            {"redmine_tag": "6.0", "ruby_version": "3.0"}
+          ]
+        }') }}
 
     steps:
       - name: Checkout plugin
@@ -81,6 +103,8 @@ jobs:
         run: npx playwright install chromium --with-deps
 
       - name: Start Docker services
+        env:
+          REDMINE_TAG: ${{ matrix.redmine_tag }}
         run: |
           chmod +x scripts/start_test_services.sh
           ./scripts/start_test_services.sh
@@ -99,7 +123,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-test-report
+          name: e2e-test-report-redmine${{ matrix.redmine_tag }}-ruby${{ matrix.ruby_version }}
           path: test/e2e/reports/
           retention-days: 14
 
@@ -107,7 +131,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-failure-screenshots
+          name: e2e-failure-screenshots-redmine${{ matrix.redmine_tag }}-ruby${{ matrix.ruby_version }}
           path: test/e2e/reports/screenshots/
           retention-days: 14
           if-no-files-found: ignore
@@ -117,10 +141,10 @@ jobs:
         working-directory: test/e2e
         run: |
           echo "=== Redmine logs ==="
-          docker compose -f docker-compose.test.yml logs --tail=100 redmine || true
+          docker compose logs --tail=100 redmine || true
           echo ""
           echo "=== Hocuspocus logs ==="
-          docker compose -f docker-compose.test.yml logs --tail=100 hocuspocus || true
+          docker compose logs --tail=100 hocuspocus || true
 
       - name: Stop Docker services
         if: always()

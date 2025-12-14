@@ -73,13 +73,13 @@ start_services() {
   log_section "Starting Docker services"
   cd "$E2E_DIR"
   
-  if [ ! -f "docker-compose.test.yml" ]; then
-    log_error "docker-compose.test.yml not found in $E2E_DIR"
+  if [ ! -f "docker-compose.yml" ]; then
+    log_error "docker-compose.yml not found in $E2E_DIR"
     exit 1
   fi
   
   log_info "Starting services in daemon mode..."
-  docker compose -f docker-compose.test.yml up --build -d || {
+  docker compose up --build -d || {
     log_error "Failed to start Docker services"
     exit 1
   }
@@ -138,8 +138,8 @@ wait_for_services() {
   
   if [ "$HOCUSPOCUS_READY" = false ] || [ "$REDMINE_READY" = false ]; then
     log_error "Some services are not ready after ${MAX_WAIT}s"
-    log_info "Check status with: docker compose -f docker-compose.test.yml ps"
-    log_info "Check logs with: docker compose -f docker-compose.test.yml logs redmine"
+    log_info "Check status with: cd test/e2e && docker compose ps"
+    log_info "Check logs with: cd test/e2e && docker compose logs redmine"
     exit 1
   fi
 }
@@ -160,7 +160,7 @@ main() {
   log_success "All test services are running in daemon mode"
   log_info "Services will continue running until stopped"
   log_info "To stop services, run: ./scripts/stop_test_services.sh"
-  log_info "Or manually: cd test/e2e && docker compose -f docker-compose.test.yml down"
+  log_info "Or manually: cd test/e2e && docker compose down"
   echo ""
 }
 

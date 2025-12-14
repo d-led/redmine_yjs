@@ -131,11 +131,11 @@ log_section() {
 cleanup_docker() {
   log_section "Cleaning up Docker services"
   cd "$E2E_DIR"
-  if [ -f "docker-compose.test.yml" ]; then
-    docker compose -f docker-compose.test.yml down -v --remove-orphans 2>/dev/null || true
+  if [ -f "docker-compose.yml" ]; then
+    docker compose down -v --remove-orphans 2>/dev/null || true
     log_success "Docker services cleaned up"
   else
-    log_warning "docker-compose.test.yml not found, skipping cleanup"
+    log_warning "docker-compose.yml not found, skipping cleanup"
   fi
 }
 

@@ -1,0 +1,82 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for changelog extraction
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Extracted version: $VERSION from tag: $TAG"
+
+      - name: Extract changelog entry
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          
+          if [ ! -f CHANGELOG.md ]; then
+            echo "CHANGELOG.md not found, using tag message"
+            RELEASE_NOTES="Release $TAG"
+          else
+            # Extract the changelog entry for this version
+            # Look for "## [VERSION]" or "## [VERSION] - DATE" pattern
+            # Stop at the next "## [" section or end of file
+            RELEASE_NOTES=$(awk -v version="$VERSION" '
+              BEGIN { in_section=0; found=0 }
+              /^## \[/ {
+                if (in_section && found) exit
+                in_section=0
+                if ($0 ~ "\\[" version "\\]") {
+                  in_section=1
+                  found=1
+                  print
+                  next
+                }
+              }
+              in_section { print }
+            ' CHANGELOG.md)
+            
+            if [ -z "$RELEASE_NOTES" ] || [ "$RELEASE_NOTES" = "" ]; then
+              echo "No changelog entry found for version $VERSION, using default"
+              RELEASE_NOTES="Release $TAG"
+            else
+              echo "Found changelog entry for version $VERSION"
+            fi
+          fi
+          
+          # Use multiline output for GitHub Actions
+          {
+            echo "notes<<EOF"
+            echo "$RELEASE_NOTES"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.tag }}
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, '-rc') || contains(steps.version.outputs.version, '-alpha') || contains(steps.version.outputs.version, '-beta') }}
+

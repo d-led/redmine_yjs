@@ -43,10 +43,10 @@ cd test/e2e
 cd test/e2e
 
 # Start minimal Redmine + Hocuspocus (SQLite database)
-docker-compose -f docker-compose.test.yml up --build -d
+docker compose up --build -d
 
 # Wait for services to be ready (takes ~60 seconds on first run)
-docker-compose -f docker-compose.test.yml logs -f
+docker compose logs -f
 ```
 
 #### 2. Install Test Dependencies
@@ -75,7 +75,7 @@ HEADLESS=false SLOW_MO=500 npm test
 #### 4. Cleanup
 
 ```bash
-docker-compose -f docker-compose.test.yml down -v
+docker compose down -v
 ```
 
 ### View Results
@@ -108,7 +108,7 @@ Environment variables:
 
 ```
 test/e2e/
-├── docker-compose.test.yml      # Minimal test stack (Redmine + Hocuspocus)
+├── docker-compose.yml            # Minimal test stack (Redmine + Hocuspocus)
 ├── Dockerfile.redmine           # Test Redmine image with plugin
 ├── scripts/
 │   └── run-tests.sh             # Test runner with setup/cleanup
@@ -166,11 +166,11 @@ Each test scenario:
 ### Services not starting
 ```bash
 # Check Docker logs
-docker-compose -f docker-compose.test.yml logs
+docker compose logs
 
 # Restart services
-docker-compose -f docker-compose.test.yml down -v
-docker-compose -f docker-compose.test.yml up --build
+docker compose down -v
+docker compose up --build
 ```
 
 ### WebSocket connection issues

@@ -17,7 +17,7 @@ This plugin addresses a long-standing feature request for real-time collaborativ
 ## Compatibility
 
 | Redmine Version | Plugin Version | Status                   |
-|-----------------|----------------|--------------------------|
+| --------------- | -------------- | ------------------------ |
 | 6.0.x           | 1.0.0+         | ✅ Supported (tested)    |
 | 6.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
 | 5.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
@@ -107,6 +107,7 @@ See [Hocuspocus Deployment](#hocuspocus-deployment) for detailed instructions.
 ### 3. Configure the Plugin
 
 Set the Hocuspocus WebSocket URL:
+
 - **Administration → Plugins → Redmine Yjs → Configure**
 - Or via environment variable: `HOCUSPOCUS_URL=wss://your-hocuspocus.example.com`
 
@@ -115,11 +116,12 @@ Set the Hocuspocus WebSocket URL:
 ### Environment Variables
 
 | Variable         | Default       | Description                                    |
-|------------------|---------------|------------------------------------------------|
+| ---------------- | ------------- | ---------------------------------------------- |
 | `HOCUSPOCUS_URL` | Auto-detected | WebSocket URL for Hocuspocus server            |
 | `YJS_ENABLED`    | `1`           | Enable/disable collaborative editing (`1`/`0`) |
 
 The plugin auto-detects the Hocuspocus URL based on environment:
+
 - Docker: `ws://localhost:3000/ws` (via Traefik)
 - Production: `wss://hocuspocus.fly.dev`
 - Development: `ws://localhost:8081`
@@ -134,14 +136,17 @@ The plugin auto-detects the Hocuspocus URL based on environment:
 ## Usage
 
 Once enabled, collaborative editing works automatically for:
+
 - Issue descriptions and notes
 - Wiki pages
-- Any textarea fields
 
 **Visual indicators**:
-- 🟢 Green dot: Connected and syncing
-- 🟠 Orange dot: Connecting...
-- 🔴 Red dot: Disconnected (changes saved locally)
+
+- **Fixed status badge** (bottom-right corner): Colored text badge showing connection status
+  - Green badge: "Collaboration active" - Connected and ready
+  - Orange badge: "Syncing..." - Connecting to server
+  - Red badge: "Disconnected" - Click to reconnect (changes saved locally)
+- **Form widget** (below editor, when focused): Shows colored circle indicator (● green, ◐ orange, ○ red) with "Collaborative Editing" label and list of other active editors
 
 ## Hocuspocus Deployment
 
@@ -194,6 +199,7 @@ cd plugins/redmine_yjs
 ```
 
 This will:
+
 - Check for Node.js/npm
 - Install Node.js dependencies
 - Build assets automatically
@@ -202,12 +208,14 @@ This will:
 ### Building Bundled Dependencies
 
 **Option 1: Using build script (recommended)**
+
 ```bash
 cd plugins/redmine_yjs
 ./scripts/build-js.sh
 ```
 
 **Option 2: Using npm directly**
+
 ```bash
 cd plugins/redmine_yjs
 npm install
@@ -215,6 +223,7 @@ npm run build:deps
 ```
 
 **Option 3: Using Rake (from Redmine root)**
+
 ```bash
 # Build assets
 bundle exec rake redmine_yjs:build_assets
@@ -241,6 +250,7 @@ Assets are automatically built if missing when the plugin loads (requires Node.j
 ```
 
 The script automatically:
+
 - Updates version in `init.rb`, `package.json`, and related files
 - Updates `CHANGELOG.md` if present
 - Updates all `package-lock.json` files
@@ -295,17 +305,20 @@ docker-compose up -d
 ## Troubleshooting
 
 **WebSocket Connection Issues**
+
 - Check Hocuspocus is running: `curl http://localhost:8081/health`
 - Check browser console for WebSocket errors
 - Verify `HOCUSPOCUS_URL` matches your deployment
 
 **Plugin Not Loading**
+
 - Check Redmine logs for errors
 - Verify plugin is in `plugins/` directory
 - Run `bundle exec rake redmine:plugins:migrate`
 - Restart Redmine
 
 **Debugging**
+
 - Hocuspocus logs: `docker logs redmine_hocuspocus`
 - Browser DevTools → Network → WS to check WebSocket connection status
 
