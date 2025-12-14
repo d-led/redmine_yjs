@@ -232,11 +232,21 @@ Assets are automatically built if missing when the plugin loads (requires Node.j
 ### Version Management
 
 ```bash
-./scripts/tag-version.sh patch      # 1.0.0 -> 1.0.1
-./scripts/tag-version.sh minor      # 1.0.0 -> 1.1.0
-./scripts/tag-version.sh major      # 1.0.0 -> 2.0.0
-./scripts/tag-version.sh --dry-run  # Preview changes
+./scripts/bump_version.sh patch      # 1.0.0 -> 1.0.1 (updates files, commits, tags)
+./scripts/bump_version.sh minor      # 1.0.0 -> 1.1.0
+./scripts/bump_version.sh major      # 1.0.0 -> 2.0.0
+./scripts/bump_version.sh rc         # 1.0.0 -> 1.0.1-rc.0
+./scripts/bump_version.sh release    # 1.0.0-rc.0 -> 1.0.0
+./scripts/bump_version.sh patch --dry-run  # Preview changes without applying
 ```
+
+The script automatically:
+- Updates version in `init.rb`, `package.json`, and related files
+- Updates `CHANGELOG.md` if present
+- Updates all `package-lock.json` files
+- Commits changes
+- Creates a git tag
+- Does NOT push (you push manually: `git push && git push --tags`)
 
 ## Testing
 
@@ -323,7 +333,7 @@ redmine_yjs/
 ├── lib/
 │   └── redmine_yjs/        # Ruby modules and patches
 ├── scripts/
-│   ├── tag-version.sh      # Version bump script
+│   ├── bump_version.sh    # Version bump, commit, and tag script
 │   ├── run_all_tests.sh    # Run all tests
 │   ├── start_test_services.sh
 │   └── stop_test_services.sh

@@ -45,9 +45,9 @@ Redmine::Plugin.register :redmine_yjs do
   name 'Redmine Yjs Collaborative Editing'
   author 'Redmine Yjs Plugin'
   description 'Integrates Yjs CRDT-based collaborative editing with Redmine editors using Hocuspocus server'
-  version '1.0.0'
-  url 'https://github.com/your-org/redmine_yjs'
-  author_url 'https://github.com/your-org'
+  version '0.0.1'
+  url 'https://github.com/d-led/redmine_yjs'
+  author_url 'https://github.com/d-led'
   
   # Requires Redmine 5.0+ (Rails 6.1+, Ruby 3.0+)
   requires_redmine version_or_higher: '5.0.0'
