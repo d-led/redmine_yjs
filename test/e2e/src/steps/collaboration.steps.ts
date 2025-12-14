@@ -413,7 +413,12 @@ Given('user {string} opens the same wiki page edit in browser B', { timeout: 300
 // =============================================================================
 
 When('user types {string} in browser A\'s editor', async function (this: ICustomWorld, text: string) {
+  // Wait a bit to ensure any content from browser B has synced before typing
+  await this.pageA!.waitForTimeout(300);
   const normalizedText = text.replace(/\\n/g, '\n');
+  // Use 'current' position to respect explicitly set cursor positions
+  // The typeInEditor function will move to end if cursor is at 0 and there's content
+  // This allows tests to set cursor position explicitly and have it respected
   await typeInEditor(this.pageA!, normalizedText, 'current');
   await waitForContent(this.pageA!, normalizedText, 2000);
 });
@@ -1118,6 +1123,47 @@ When('user saves the issue in browser A', async function (this: ICustomWorld) {
 });
 
 When('user saves the issue in browser B', async function (this: ICustomWorld) {
+  // Get the current content in browser A before save (for debugging)
+  const contentBeforeSave = await getEditorContent(this.pageA!);
+  console.log('[Collab] Browser A content before B saves:', contentBeforeSave);
+  
   await saveIssue(this.pageB!, 'B');
+  
+  // After save, wait for content to sync to browser A
+  // The save updates the database, but browser A's Yjs document should already have the content
+  // via real-time sync. However, we wait a bit to ensure everything is stable.
+  await this.pageA!.waitForTimeout(2000);
+  await this.pageB!.waitForTimeout(1000);
+  
+  // Verify that browser A still has the expected content after the save
+  const contentAfterSave = await getEditorContent(this.pageA!);
+  console.log('[Collab] Browser A content after B saves:', contentAfterSave);
+  
+  // The content should be the same (or at least contain what was there before)
+  // If it's different, that's the bug we're trying to catch
+  if (contentBeforeSave && !contentAfterSave.includes(contentBeforeSave.trim())) {
+    console.warn('[Collab] WARNING: Browser A content changed after B saved!');
+    console.warn('[Collab] Before:', contentBeforeSave);
+    console.warn('[Collab] After:', contentAfterSave);
+  }
+});
+
+Then('browser A should not show {string}', async function (this: ICustomWorld, text: string) {
+  const page = this.pageA!;
+  
+  // Wait a bit for any error messages to appear
+  await page.waitForTimeout(1000);
+  
+  // Check that the text is NOT visible anywhere on the page
+  const errorLocator = page.locator(`text=/${text}/i`);
+  const isVisible = await errorLocator.isVisible().catch(() => false);
+  
+  if (isVisible) {
+    // Get the actual text to show in error message
+    const visibleText = await errorLocator.textContent().catch(() => '');
+    throw new Error(`Expected not to see "${text}" but found: "${visibleText}"`);
+  }
+  
+  console.log(`[Collab] Verified that "${text}" is not shown in browser A`);
 });
 

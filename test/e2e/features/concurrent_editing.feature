@@ -29,6 +29,7 @@ Feature: Concurrent collaborative editing
     Scenario: Concurrent edits are merged without conflict
         Given user "admin" opens the issue in browser A
         And user "admin" opens the same issue in browser B
+        And the editor is empty
         When user types "Start: " at the beginning in browser A's editor
         And user types " :End" at the end in browser B's editor
         Then both browsers show "Start:  :End"
@@ -103,4 +104,33 @@ Feature: Concurrent collaborative editing
         # Browser B should also see the final merged content when navigating to edit
         Given user "admin" opens the same issue in browser B
         Then browser B's editor shows "Content from A | Saved by B | Added after B saved"
+
+    @ui
+    Scenario: Stale object error is handled gracefully with merge
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        And the editor is empty
+        # User A types and prepares to save
+        When user types "Initial content" in browser A's editor
+        Then browser B's editor shows "Initial content"
+        # User B saves first (this will cause stale object error when A saves)
+        When user types " | B saved first" in browser B's editor
+        Then browser A's editor shows "Initial content | B saved first"
+        When user saves the issue in browser B
+        # User A adds more content (has unsaved changes that will conflict)
+        When user types " | A's unsaved changes" in browser A's editor
+        Then browser A's editor shows "Initial content | B saved first | A's unsaved changes"
+        # User A saves - this should trigger stale object error, merge, and retry
+        # The error message should NOT be shown to the user
+        When user saves the issue in browser A
+        # Verify no error message is shown
+        Then browser A should not show "Data has been updated by another user"
+        # After save completes, verify merged content is correct
+        # Browser A is redirected after save, so navigate back to edit
+        Given user "admin" opens the issue in browser A
+        # The merged content should include both B's saved content and A's changes
+        Then browser A's editor shows "Initial content | B saved first | A's unsaved changes"
+        # Browser B should also see the final merged content
+        Given user "admin" opens the same issue in browser B
+        Then browser B's editor shows "Initial content | B saved first | A's unsaved changes"
 

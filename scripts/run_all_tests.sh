@@ -18,7 +18,9 @@
 #   ./scripts/start_test_services.sh
 # Or use --start-services flag to start them automatically.
 #
-set -e
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
 
 # Track child process PIDs for cleanup
 CHILD_PIDS=()
@@ -228,56 +230,37 @@ run_js_tests() {
 run_ruby_tests() {
   log_section "Running Ruby Tests"
   
-  # Check if Redmine checkout exists
+  # Note: Docker containers are configured for production (E2E tests), not test environment
+  # Ruby tests require test database which isn't configured in production containers
+  # So we skip Ruby tests when running in Docker and only run them locally
+  E2E_CONTAINER="redmine_yjs_test_app"
+  MAIN_CONTAINER="redmine"
+  if docker ps --format '{{.Names}}' | grep -qE "^(${E2E_CONTAINER}|${MAIN_CONTAINER})$"; then
+    log_info "Ruby tests skipped (Docker containers are configured for production, not test)"
+    log_info "To run Ruby tests, use a local Redmine checkout"
+  fi
+  
+  # Fallback: Check if Redmine checkout exists locally
   REDMINE_DIR="${REDMINE_DIR:-../redmine}"
-  if [ ! -d "$REDMINE_DIR" ]; then
-    log_warning "Redmine directory not found at $REDMINE_DIR"
-    log_info "To run Ruby tests, checkout Redmine:"
-    log_info "  git clone https://github.com/redmine/redmine.git $REDMINE_DIR"
-    log_info "  cd $REDMINE_DIR && git checkout 6.0-stable"
-    log_info "  cd $REDMINE_DIR/plugins/redmine_yjs && ln -s ../../../redmine_yjs ."
-    log_info ""
-    log_info "Or set REDMINE_DIR environment variable:"
-    log_info "  export REDMINE_DIR=/path/to/redmine"
-    log_info "  $0 --ruby-only"
-    # Return 0 to indicate skip (not failure) when not in ruby-only mode
-    if [ "$RUBY_ONLY" = true ]; then
-      return 1
-    else
-      return 0
+  if [ -d "$REDMINE_DIR" ]; then
+    log_info "Running Ruby tests against local Redmine checkout"
+    
+    # Check if plugin is symlinked
+    PLUGIN_LINK="$REDMINE_DIR/plugins/redmine_yjs"
+    if [ ! -L "$PLUGIN_LINK" ] && [ ! -d "$PLUGIN_LINK" ]; then
+      log_info "Creating symlink: ln -s $PLUGIN_DIR $PLUGIN_LINK"
+      mkdir -p "$REDMINE_DIR/plugins"
+      ln -sf "$PLUGIN_DIR" "$PLUGIN_LINK"
+      log_success "Symlink created"
     fi
-  fi
-  
-  # Check if plugin is symlinked
-  PLUGIN_LINK="$REDMINE_DIR/plugins/redmine_yjs"
-  if [ ! -L "$PLUGIN_LINK" ] && [ ! -d "$PLUGIN_LINK" ]; then
-    log_warning "Plugin not found in Redmine plugins directory"
-    log_info "Creating symlink: ln -s $PLUGIN_DIR $PLUGIN_LINK"
-    mkdir -p "$REDMINE_DIR/plugins"
-    ln -sf "$PLUGIN_DIR" "$PLUGIN_LINK"
-    log_success "Symlink created"
-  fi
-  
-  # Check PostgreSQL
-  if ! command -v psql &> /dev/null; then
-    log_warning "PostgreSQL client not found, checking Docker..."
-    if docker ps | grep -q postgres; then
-      log_info "PostgreSQL container found"
-    else
-      log_warning "PostgreSQL not available. Ruby tests require PostgreSQL."
-      log_info "Start PostgreSQL with Docker:"
-      log_info "  docker run -d --name redmine_postgres -e POSTGRES_USER=redmine -e POSTGRES_PASSWORD=redmine -e POSTGRES_DB=redmine_test -p 5432:5432 postgres:15"
-      return 1
-    fi
-  fi
-  
-  cd "$REDMINE_DIR"
-  
-  # Check database.yml
-  if [ ! -f "config/database.yml" ]; then
-    log_info "Creating database.yml for testing..."
-    mkdir -p config
-    cat > config/database.yml << EOF
+    
+    cd "$REDMINE_DIR"
+    
+    # Check database.yml
+    if [ ! -f "config/database.yml" ]; then
+      log_info "Creating database.yml for testing..."
+      mkdir -p config
+      cat > config/database.yml << EOF
 test:
   adapter: postgresql
   database: redmine_test
@@ -286,41 +269,58 @@ test:
   password: redmine
   encoding: utf8
 EOF
-    log_success "database.yml created"
-  fi
-  
-  # Install dependencies if needed
-  if [ ! -d "vendor/bundle" ]; then
-    log_info "Installing Ruby dependencies..."
-    bundle config set --local without 'development'
-    bundle install --jobs 4 --retry 3 || {
-      log_error "Failed to install Ruby dependencies"
+      log_success "database.yml created"
+    fi
+    
+    # Install dependencies if needed
+    if [ ! -d "vendor/bundle" ]; then
+      log_info "Installing Ruby dependencies..."
+      bundle config set --local without 'development'
+      bundle install --jobs 4 --retry 3 || {
+        log_error "Failed to install Ruby dependencies"
+        return 1
+      }
+    fi
+    
+    # Setup database
+    log_info "Setting up database..."
+    RAILS_ENV=test bundle exec rake db:create db:migrate || {
+      log_error "Failed to setup database"
       return 1
     }
+    
+    # Run plugin migrations
+    log_info "Running plugin migrations..."
+    RAILS_ENV=test bundle exec rake redmine:plugins:migrate || {
+      log_error "Failed to run plugin migrations"
+      return 1
+    }
+    
+    # Run tests
+    log_info "Running Ruby tests..."
+    if RAILS_ENV=test bundle exec rake test TEST="plugins/redmine_yjs/test/**/*_test.rb" TESTOPTS="--verbose"; then
+      log_success "Ruby tests passed"
+      return 0
+    else
+      log_error "Ruby tests failed"
+      return 1
+    fi
   fi
   
-  # Setup database
-  log_info "Setting up database..."
-  RAILS_ENV=test bundle exec rake db:create db:migrate || {
-    log_error "Failed to setup database"
+  # No Docker container or local checkout found
+  if [ "$RUBY_ONLY" = true ]; then
+    log_error "Cannot run Ruby tests:"
+    log_error "  - No Docker container found (${E2E_CONTAINER} or ${MAIN_CONTAINER})"
+    log_error "  - No local Redmine checkout found at ${REDMINE_DIR}"
+    log_info ""
+    log_info "To run Ruby tests:"
+    log_info "  1. Start Docker services: ./scripts/start_test_services.sh"
+    log_info "  2. Or checkout Redmine locally: git clone https://github.com/redmine/redmine.git ${REDMINE_DIR}"
     return 1
-  }
-  
-  # Run plugin migrations
-  log_info "Running plugin migrations..."
-  RAILS_ENV=test bundle exec rake redmine:plugins:migrate || {
-    log_error "Failed to run plugin migrations"
-    return 1
-  }
-  
-  # Run tests
-  log_info "Running Ruby tests..."
-  if RAILS_ENV=test bundle exec rake test TEST="plugins/redmine_yjs/test/**/*_test.rb" TESTOPTS="--verbose"; then
-    log_success "Ruby tests passed"
-    return 0
   else
-    log_error "Ruby tests failed"
-    return 1
+    # In Docker setups, Ruby tests are optional - E2E tests cover the functionality
+    log_info "Ruby tests skipped (no Docker container or local Redmine checkout found)"
+    return 0
   fi
 }
 
@@ -373,14 +373,6 @@ run_e2e_tests() {
     log_info "Or use --start-services flag to start them automatically"
   fi
   
-  # Build test command (use npm run test which calls test-runner.sh)
-  # The test-runner.sh uses npx cucumber-js, so we're already using npx
-  TEST_CMD="npm test"
-  
-  if [ -n "$TAGS" ]; then
-    TEST_CMD="$TEST_CMD -- --tags $TAGS"
-  fi
-  
   if [ "$VISIBLE" = true ]; then
     export HEADLESS=false
     export SLOW_MO=200
@@ -396,7 +388,11 @@ run_e2e_tests() {
   # Run the test command - signals should be forwarded to it
   # Use 'set +e' temporarily so we can capture exit code
   set +e
-  $TEST_CMD
+  if [ -n "$TAGS" ]; then
+    npm test -- --tags "$TAGS"
+  else
+    npm test
+  fi
   TEST_EXIT_CODE=$?
   set -e
   

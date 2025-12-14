@@ -33,9 +33,11 @@
   // 5. Issue edit form detected (has issue form with description/notes fields) - even if hidden
   // 6. Wiki edit form detected
   // 7. Issue show page (might have hidden edit form that becomes visible)
+  // 8. Wiki show page (might have edit form that becomes visible)
   const pathHasEdit = window.location.pathname.includes('/edit');
   const queryHasEdit = window.location.search.includes('edit=true');
   const isIssueShowPage = /\/issues\/\d+$/.test(window.location.pathname); // e.g., /issues/1
+  const isWikiShowPage = /\/projects\/[^\/]+\/wiki\/[^\/]+$/.test(window.location.pathname); // e.g., /projects/test/wiki/Page
   // Check for textareas even if hidden (issue edit form might be hidden initially)
   // querySelector finds elements even if they're hidden (display: none)
   // Include #issue_description_and_toolbar and #update which contain the edit form
@@ -50,18 +52,18 @@
                        document.querySelector('iframe.cke_wysiwyg_frame') ||
                        document.querySelector('[id*="description"][class*="cke"], [id*="notes"][class*="cke"], [id*="content"][class*="cke"]'));
   
-  // On issue show pages, always enable collaboration (form might be hidden initially)
-  const isEditPage = pathHasEdit || queryHasEdit || hasTextarea || hasIssueForm || hasWikiForm || hasCKEditor || isIssueShowPage;
+  // On issue and wiki show pages, always enable collaboration (form might be hidden initially)
+  const isEditPage = pathHasEdit || queryHasEdit || hasTextarea || hasIssueForm || hasWikiForm || hasCKEditor || isIssueShowPage || isWikiShowPage;
   
   if (!isEditPage) {
     console.log('[Yjs] Not an edit page, skipping collaboration initialization');
-    console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor, 'isIssueShowPage:', isIssueShowPage);
+    console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor, 'isIssueShowPage:', isIssueShowPage, 'isWikiShowPage:', isWikiShowPage);
     console.log('[Yjs] Debug - pathname:', window.location.pathname, 'search:', window.location.search);
     return;
   }
   
   console.log('[Yjs] Edit page detected, initializing collaboration');
-  console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor, 'isIssueShowPage:', isIssueShowPage);
+  console.log('[Yjs] Debug - pathHasEdit:', pathHasEdit, 'queryHasEdit:', queryHasEdit, 'hasTextarea:', !!hasTextarea, 'hasIssueForm:', !!hasIssueForm, 'hasWikiForm:', !!hasWikiForm, 'hasCKEditor:', hasCKEditor, 'isIssueShowPage:', isIssueShowPage, 'isWikiShowPage:', isWikiShowPage);
 
   // Check for libraries immediately - fail fast if not available
   // CDN scripts load synchronously before this script runs
@@ -1168,23 +1170,33 @@
       if (transaction.origin === LOCAL_ORIGIN) return;
       if (isUpdating) return;
       
+      // Only update content if textarea is NOT focused
+      // If user is actively editing, we should preserve their cursor position
+      // If textarea is not focused, updating content won't affect cursor position
+      const isFocused = document.activeElement === textarea;
+      
       isUpdating = true;
       const currentValue = textarea.value;
       const yjsValue = ytext.toString();
       
       if (currentValue !== yjsValue) {
+        // Save cursor position before updating content
+        const currentCursorPos = textarea.selectionStart;
+        const currentSelectionEnd = textarea.selectionEnd;
+        
         // Update content - Yjs CRDT handles merging automatically
         // Cursor positions are communicated via awareness, NOT by adjusting cursor on content changes
         // See: https://docs.yjs.dev/getting-started/adding-awareness
         // We should NOT adjust cursor position based on remote content changes
-        const currentCursorPos = textarea.selectionStart;
         textarea.value = yjsValue;
         
         // Only clamp cursor if it's beyond the new content length (safety measure)
         // Otherwise, let the browser preserve the cursor position naturally
         // The browser's default behavior is correct - it preserves cursor position relative to content
-        if (currentCursorPos > yjsValue.length) {
-          textarea.setSelectionRange(yjsValue.length, yjsValue.length);
+        const maxPos = yjsValue.length;
+        if (currentCursorPos > maxPos || currentSelectionEnd > maxPos) {
+          // Position is out of bounds, clamp to end
+          textarea.setSelectionRange(maxPos, maxPos);
         }
         // Note: If cursor was at position 5 and someone inserts text before position 5,
         // the browser will naturally move the cursor forward. This is correct behavior.
@@ -2632,12 +2644,12 @@
       return;
     }
     
-    const { document, content, autoRetry } = mergeData;
-    console.log('[Yjs] Processing merge data for:', document, 'autoRetry:', autoRetry);
+    const { document: documentName, content, autoRetry } = mergeData;
+    console.log('[Yjs] Processing merge data for:', documentName, 'autoRetry:', autoRetry);
     
     function tryMerge() {
       if (window.RedmineYjs && window.RedmineYjs.mergeExternalContent) {
-        const merged = window.RedmineYjs.mergeExternalContent(document, content);
+        const merged = window.RedmineYjs.mergeExternalContent(documentName, content);
         if (merged && autoRetry) {
           // Auto-retry the save after merge completes
           setTimeout(() => {
