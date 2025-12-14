@@ -8,6 +8,8 @@ end
 require "#{base_path}/lib/redmine_yjs"
 require "#{base_path}/lib/redmine_yjs/application_helper_patch"
 require "#{base_path}/lib/redmine_yjs/hooks"
+require "#{base_path}/lib/redmine_yjs/wiki_controller_patch"
+require "#{base_path}/lib/redmine_yjs/issues_controller_patch"
 
 ActiveSupport::Reloader.to_prepare do
   # Apply patches to ApplicationHelper (like CKEditor does)
@@ -20,6 +22,22 @@ ActiveSupport::Reloader.to_prepare do
   if defined?(ApplicationController)
     ApplicationController.send(:helper, RedmineYjs::ApplicationHelperPatch)
     Rails.logger.info "[Yjs] Helper registered with ApplicationController"
+  end
+  
+  # Patch WikiController to bypass stale object check when Yjs is enabled
+  if defined?(WikiController)
+    unless WikiController.included_modules.include?(RedmineYjs::WikiControllerPatch)
+      WikiController.send(:include, RedmineYjs::WikiControllerPatch)
+      Rails.logger.info "[Yjs] WikiController patch included"
+    end
+  end
+  
+  # Patch IssuesController to bypass stale object check when Yjs is enabled
+  if defined?(IssuesController)
+    unless IssuesController.included_modules.include?(RedmineYjs::IssuesControllerPatch)
+      IssuesController.send(:include, RedmineYjs::IssuesControllerPatch)
+      Rails.logger.info "[Yjs] IssuesController patch included"
+    end
   end
 end
 
