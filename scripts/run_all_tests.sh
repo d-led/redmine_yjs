@@ -2,11 +2,13 @@
 # Run all tests for Redmine Yjs plugin
 #
 # This script runs:
-# 1. Ruby unit/integration tests (requires Redmine checkout + PostgreSQL)
-# 2. E2E tests (requires Docker Compose with Redmine + Hocuspocus)
+# 1. JavaScript unit tests (Vitest)
+# 2. Ruby unit/integration tests (requires Redmine checkout + PostgreSQL)
+# 3. E2E tests (requires Docker Compose with Redmine + Hocuspocus)
 #
 # Usage:
 #   ./scripts/run_all_tests.sh              # Run all tests (assumes services are running)
+#   ./scripts/run_all_tests.sh --js-only    # Run only JavaScript unit tests
 #   ./scripts/run_all_tests.sh --ruby-only  # Run only Ruby tests
 #   ./scripts/run_all_tests.sh --e2e-only   # Run only E2E tests (assumes services are running)
 #   ./scripts/run_all_tests.sh --start-services  # Start services before running tests
@@ -52,6 +54,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Parse arguments
+JS_ONLY=false
 RUBY_ONLY=false
 E2E_ONLY=false
 START_SERVICES=false
@@ -61,6 +64,10 @@ TAGS=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --js-only)
+      JS_ONLY=true
+      shift
+      ;;
     --ruby-only)
       RUBY_ONLY=true
       shift
@@ -87,7 +94,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown option: $1"
-      echo "Usage: $0 [--ruby-only] [--e2e-only] [--start-services] [--cleanup] [--visible] [--tags @tagname]"
+      echo "Usage: $0 [--js-only] [--ruby-only] [--e2e-only] [--start-services] [--cleanup] [--visible] [--tags @tagname]"
       exit 1
       ;;
   esac
@@ -153,14 +160,21 @@ check_prerequisites() {
   fi
   log_success "docker compose is available"
   
-  # Check Node.js/npm for E2E tests (we'll use npx, so npm is sufficient)
-  if [ "$E2E_ONLY" = false ] && [ "$RUBY_ONLY" = false ]; then
+  # Check Node.js/npm for JS and E2E tests
+  if [ "$E2E_ONLY" = false ] && [ "$RUBY_ONLY" = false ] && [ "$JS_ONLY" = false ]; then
     if ! command -v npm &> /dev/null; then
-      log_error "npm is not installed (required for E2E tests)"
+      log_error "npm is not installed (required for JS and E2E tests)"
       log_info "Install Node.js which includes npm: https://nodejs.org/"
       exit 1
     fi
-    log_success "npm is available (will use npx for commands)"
+    log_success "npm is available"
+  elif [ "$JS_ONLY" = true ] || [ "$E2E_ONLY" = true ]; then
+    if ! command -v npm &> /dev/null; then
+      log_error "npm is not installed"
+      log_info "Install Node.js which includes npm: https://nodejs.org/"
+      exit 1
+    fi
+    log_success "npm is available"
   fi
   
   # Check Ruby for Ruby tests
@@ -170,6 +184,43 @@ check_prerequisites() {
     else
       log_success "Ruby is available"
     fi
+  fi
+}
+
+# Run JavaScript unit tests
+run_js_tests() {
+  log_section "Running JavaScript Unit Tests"
+  
+  cd "$PLUGIN_DIR"
+  
+  # Check if package.json exists
+  if [ ! -f "package.json" ]; then
+    log_error "package.json not found in $PLUGIN_DIR"
+    return 1
+  fi
+  
+  # Install dependencies if needed
+  if [ ! -d "node_modules" ]; then
+    log_info "Installing npm dependencies..."
+    if command -v npm &> /dev/null; then
+      npm install || {
+        log_error "Failed to install npm dependencies"
+        return 1
+      }
+    else
+      log_error "npm is not available"
+      return 1
+    fi
+  fi
+  
+  # Run tests
+  log_info "Running JavaScript unit tests..."
+  if npm test; then
+    log_success "JavaScript unit tests passed"
+    return 0
+  else
+    log_error "JavaScript unit tests failed"
+    return 1
   fi
 }
 
@@ -376,11 +427,31 @@ main() {
   check_prerequisites
   
   # Track results
+  JS_RESULT=0
   RUBY_RESULT=0
   E2E_RESULT=0
   
+  # Run JavaScript unit tests
+  if [ "$RUBY_ONLY" = false ] && [ "$E2E_ONLY" = false ]; then
+    if run_js_tests; then
+      JS_RESULT=0
+    else
+      JS_RESULT=1
+      if [ "$JS_ONLY" = true ]; then
+        exit $JS_RESULT
+      fi
+    fi
+  elif [ "$JS_ONLY" = true ]; then
+    if run_js_tests; then
+      JS_RESULT=0
+    else
+      JS_RESULT=1
+    fi
+    exit $JS_RESULT
+  fi
+  
   # Run Ruby tests
-  if [ "$E2E_ONLY" = false ]; then
+  if [ "$E2E_ONLY" = false ] && [ "$JS_ONLY" = false ]; then
     if run_ruby_tests; then
       RUBY_RESULT=0
     else
@@ -397,7 +468,7 @@ main() {
   fi
   
   # Run E2E tests
-  if [ "$RUBY_ONLY" = false ]; then
+  if [ "$RUBY_ONLY" = false ] && [ "$JS_ONLY" = false ]; then
     if run_e2e_tests; then
       E2E_RESULT=0
     else
@@ -408,7 +479,15 @@ main() {
   # Summary
   log_section "Test Summary"
   
-  if [ "$E2E_ONLY" = false ]; then
+  if [ "$E2E_ONLY" = false ] && [ "$RUBY_ONLY" = false ]; then
+    if [ $JS_RESULT -eq 0 ]; then
+      log_success "JavaScript unit tests: PASSED"
+    else
+      log_error "JavaScript unit tests: FAILED"
+    fi
+  fi
+  
+  if [ "$E2E_ONLY" = false ] && [ "$JS_ONLY" = false ]; then
     if [ $RUBY_RESULT -eq 0 ]; then
       log_success "Ruby tests: PASSED"
     else
@@ -416,7 +495,7 @@ main() {
     fi
   fi
   
-  if [ "$RUBY_ONLY" = false ]; then
+  if [ "$RUBY_ONLY" = false ] && [ "$JS_ONLY" = false ]; then
     if [ $E2E_RESULT -eq 0 ]; then
       log_success "E2E tests: PASSED"
     else
@@ -428,7 +507,7 @@ main() {
   # We don't need to cleanup here explicitly since the trap will handle it
   
   # Exit with appropriate code
-  if [ $RUBY_RESULT -eq 0 ] && [ $E2E_RESULT -eq 0 ]; then
+  if [ $JS_RESULT -eq 0 ] && [ $RUBY_RESULT -eq 0 ] && [ $E2E_RESULT -eq 0 ]; then
     log_success "All tests passed!"
     exit 0
   else
