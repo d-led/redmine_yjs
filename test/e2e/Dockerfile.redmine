@@ -4,14 +4,18 @@ ARG REDMINE_TAG=6.0
 
 FROM redmine:${REDMINE_TAG}
 
-# Install build tools for native extensions
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Update system packages and install build tools for native extensions
+# Apply security updates to mitigate vulnerabilities in base image
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
     build-essential \
     sqlite3 \
     libsqlite3-dev \
     libyaml-dev \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/redmine
 
@@ -29,6 +33,8 @@ RUN mkdir -p config && \
     echo "  database: /tmp/redmine.sqlite3" >> config/database.yml
 
 # Install plugin gems
+# Note: Gem vulnerabilities (e.g., Rack CVEs) are constrained by Redmine's Gemfile
+# and cannot be updated without potentially breaking Redmine compatibility
 RUN bundle config set --local without 'development test' && \
     bundle config set --local path '/usr/local/bundle' && \
     bundle install --jobs 4 --retry 3
