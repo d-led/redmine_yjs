@@ -2,6 +2,10 @@
 
 Real-time collaborative editing for Redmine using [Yjs](https://github.com/yjs/yjs) CRDTs and [Hocuspocus](https://github.com/ueberdosis/hocuspocus) WebSocket server.
 
+## What Problem Does This Solve?
+
+This plugin addresses a long-standing feature request for real-time collaborative editing in Redmine, as discussed in [Feature #10568](https://www.redmine.org/issues/10568). Multiple users can now edit wiki pages, issue descriptions, and notes simultaneously with live synchronization—similar to Google Docs.
+
 ## Features
 
 - Real-time sync with conflict-free merging (CRDT)
@@ -12,13 +16,13 @@ Real-time collaborative editing for Redmine using [Yjs](https://github.com/yjs/y
 
 ## Compatibility
 
-| Redmine Version | Plugin Version | Status |
-|-----------------|----------------|--------|
-| 6.0.x           | 1.0.0+         | ✅ Supported (tested) |
+| Redmine Version | Plugin Version | Status                   |
+|-----------------|----------------|--------------------------|
+| 6.0.x           | 1.0.0+         | ✅ Supported (tested)    |
 | 6.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
 | 5.1.x           | 1.0.0+         | ⚠️ Might work (untested) |
 | 5.0.x           | 1.0.0+         | ⚠️ Might work (untested) |
-| 4.x and earlier | -              | ❌ Not supported |
+| 4.x and earlier | -              | ❌ Not supported         |
 
 ### Requirements
 
@@ -32,16 +36,14 @@ Real-time collaborative editing for Redmine using [Yjs](https://github.com/yjs/y
 ### 1. Install the Plugin
 
 ```bash
-# Clone into Redmine plugins directory
 cd /path/to/redmine/plugins
 git clone https://github.com/your-org/redmine_yjs.git
 
 # Copy assets (Redmine 6.x)
-# Note: In Docker builds, assets are copied automatically during image build
 mkdir -p ../public/plugin_assets/redmine_yjs
 cp -r redmine_yjs/assets/* ../public/plugin_assets/redmine_yjs/
 
-# Run migrations (if any)
+# Run migrations
 cd /path/to/redmine
 bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 
@@ -50,9 +52,11 @@ bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 
 ### 2. Deploy Hocuspocus Server
 
-The plugin includes a Hocuspocus WebSocket server in the `hocuspocus/` directory.
+**Important**: This plugin requires a separate Hocuspocus WebSocket server. You must deploy and maintain this backend service.
 
-#### Option A: Use Published Docker Image (Recommended)
+**Security Recommendation**: Put an authenticating proxy (e.g., nginx with authentication, Traefik, or similar) in front of both Redmine and the Hocuspocus server to ensure only authenticated users can access the collaboration features.
+
+#### Quick Start (Docker)
 
 ```bash
 docker run -p 8081:8081 ghcr.io/d-led/redmine_yjs-hocuspocus:latest
@@ -68,34 +72,17 @@ services:
       - "8081:8081"
 ```
 
-#### Option B: Build Locally
+#### Other Deployment Options
 
-```bash
-cd redmine_yjs/hocuspocus
-docker build -t hocuspocus .
-docker run -p 8081:8081 hocuspocus
-```
-
-#### Option C: Standalone Node.js
-
-```bash
-cd redmine_yjs/hocuspocus
-npm install
-npm start
-```
-
-#### Option D: Deploy to Fly.io
-
-```bash
-cd redmine_yjs/hocuspocus
-./fly-deploy.sh
-```
+- **Build locally**: `cd redmine_yjs/hocuspocus && docker build -t hocuspocus . && docker run -p 8081:8081 hocuspocus`
+- **Standalone Node.js**: `cd redmine_yjs/hocuspocus && npm install && npm start`
+- **Fly.io**: `cd redmine_yjs/hocuspocus && ./fly-deploy.sh`
 
 See [Hocuspocus Deployment](#hocuspocus-deployment) for detailed instructions.
 
 ### 3. Configure the Plugin
 
-Set the Hocuspocus WebSocket URL in:
+Set the Hocuspocus WebSocket URL:
 - **Administration → Plugins → Redmine Yjs → Configure**
 - Or via environment variable: `HOCUSPOCUS_URL=wss://your-hocuspocus.example.com`
 
@@ -103,20 +90,15 @@ Set the Hocuspocus WebSocket URL in:
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HOCUSPOCUS_URL` | Auto-detected | WebSocket URL for Hocuspocus server |
-| `YJS_ENABLED` | `1` | Enable/disable collaborative editing (`1`/`0`) |
+| Variable         | Default       | Description                                    |
+|------------------|---------------|------------------------------------------------|
+| `HOCUSPOCUS_URL` | Auto-detected | WebSocket URL for Hocuspocus server            |
+| `YJS_ENABLED`    | `1`           | Enable/disable collaborative editing (`1`/`0`) |
 
-### Auto-Configuration
-
-The plugin auto-detects the Hocuspocus URL:
-
-| Environment | URL |
-|-------------|-----|
-| Docker | `ws://localhost:3000/ws` (via Traefik) |
-| Production | `wss://hocuspocus.fly.dev` |
-| Development | `ws://localhost:8081` |
+The plugin auto-detects the Hocuspocus URL based on environment:
+- Docker: `ws://localhost:3000/ws` (via Traefik)
+- Production: `wss://hocuspocus.fly.dev`
+- Development: `ws://localhost:8081`
 
 ### Manual Configuration
 
@@ -145,8 +127,6 @@ The `hocuspocus/` directory contains a ready-to-deploy Hocuspocus server.
 
 ```bash
 cd hocuspocus
-
-# Build and run
 docker build -t redmine-hocuspocus .
 docker run -p 8081:8081 redmine-hocuspocus
 ```
@@ -167,23 +147,15 @@ services:
 
 ```bash
 cd hocuspocus
-
-# First time setup
 flyctl apps create my-hocuspocus --org personal
 flyctl deploy --config fly.toml
-
-# Get WebSocket URL
-flyctl status
-# → Use: wss://my-hocuspocus.fly.dev
+# Use: wss://my-hocuspocus.fly.dev
 ```
 
 ### Health Check
 
-The server exposes a health endpoint:
-
 ```bash
-curl http://localhost:8081/health
-# → OK
+curl http://localhost:8081/health  # → OK
 ```
 
 ## Development
@@ -251,33 +223,20 @@ docker-compose up -d
 
 ## Troubleshooting
 
-### WebSocket Connection Issues
+**WebSocket Connection Issues**
+- Check Hocuspocus is running: `curl http://localhost:8081/health`
+- Check browser console for WebSocket errors
+- Verify `HOCUSPOCUS_URL` matches your deployment
 
-1. Check Hocuspocus is running:
-   ```bash
-   curl http://localhost:8081/health
-   ```
+**Plugin Not Loading**
+- Check Redmine logs for errors
+- Verify plugin is in `plugins/` directory
+- Run `bundle exec rake redmine:plugins:migrate`
+- Restart Redmine
 
-2. Check browser console for WebSocket errors
-
-3. Verify `HOCUSPOCUS_URL` matches your deployment
-
-### Plugin Not Loading
-
-1. Check Redmine logs for errors
-2. Verify plugin is in `plugins/` directory
-3. Run `bundle exec rake redmine:plugins:migrate`
-4. Restart Redmine
-
-### Debugging
-
-```bash
-# Hocuspocus logs
-docker logs redmine_hocuspocus
-
-# Browser DevTools → Network → WS
-# Check WebSocket connection status
-```
+**Debugging**
+- Hocuspocus logs: `docker logs redmine_hocuspocus`
+- Browser DevTools → Network → WS to check WebSocket connection status
 
 ## File Structure
 
