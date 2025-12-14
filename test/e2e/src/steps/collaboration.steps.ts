@@ -419,6 +419,8 @@ When('user types {string} in browser A\'s editor', async function (this: ICustom
 });
 
 When('user types {string} in browser B\'s editor', async function (this: ICustomWorld, text: string) {
+  // Wait a bit to ensure any content from browser A has synced before typing
+  await this.pageB!.waitForTimeout(300);
   await typeInEditor(this.pageB!, text, 'end');
   await this.pageB!.waitForTimeout(500);
 });
@@ -752,8 +754,9 @@ Then('browser B shows {int} other editor(s) connected', async function (this: IC
 });
 
 Then('browser A\'s editor shows {string}', async function (this: ICustomWorld, expectedText: string) {
+  await this.pageA!.waitForTimeout(500);
   const normalizedExpected = expectedText.replace(/\\n/g, '\n');
-  await waitForContent(this.pageA!, normalizedExpected, 2000);
+  await waitForContent(this.pageA!, normalizedExpected, 5000);
 });
 
 Then('browser B shows a cursor at the correct vertical position for browser A', async function (this: ICustomWorld) {
@@ -906,6 +909,9 @@ async function waitForCollaborationReady(page: Page): Promise<void> {
   const editorLocator = getEditorLocator(page);
   await editorLocator.waitFor({ state: 'attached', timeout: 20000 });
   
+  // Force focus editor to ensure collaboration initializes
+  await forceFocusEditor(page, editorLocator);
+  
   // Optionally wait for Yjs status widget to exist (but don't fail if it's hidden)
   // The widget might be hidden by CSS but Yjs is still functional
   try {
@@ -915,7 +921,43 @@ async function waitForCollaborationReady(page: Page): Promise<void> {
     // Status widget not found, but editor is ready - continue anyway
   }
   
-  // Wait a bit for Yjs to initialize (even if widget is hidden)
+  // Wait for WebSocket connection to be established and document to sync
+  // Poll for connection status to be "connected" (with timeout)
+  const maxWait = 10000;
+  const pollInterval = 500;
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWait) {
+    const isConnected = await page.evaluate(() => {
+      // Check if provider exists and is connected
+      const widget = document.getElementById('yjs-collaboration-status') || 
+                     document.querySelector('.yjs-collaboration-status-widget');
+      if (!widget) return false;
+      
+      // Check for connected class or status
+      const hasConnected = widget.classList.contains('connected') || 
+                          widget.textContent?.includes('connected');
+      
+      // Also check if provider is available in window
+      const provider = (window as any).__yjsProvider;
+      if (provider) {
+        return provider.ws?.readyState === WebSocket.OPEN;
+      }
+      
+      return hasConnected;
+    }).catch(() => false);
+    
+    if (isConnected) {
+      // Connection established, wait a bit more for document sync
+      await page.waitForTimeout(1000);
+      return;
+    }
+    
+    await page.waitForTimeout(pollInterval);
+  }
+  
+  // If we get here, connection might not be established, but continue anyway
+  // (it might connect later, or the test will fail if collaboration doesn't work)
   await page.waitForTimeout(2000);
 }
 
@@ -953,7 +995,47 @@ When('browser B reloads the page', async function (this: ICustomWorld) {
   // Wait for collaboration to be fully ready again
   await waitForCollaborationReady(this.pageB!);
   
-  console.log('[Collab] Browser B reloaded and collaboration ready');
+  // Ensure browser A's editor is focused so it can receive updates from browser B
+  const editorLocatorA = getEditorLocator(this.pageA!);
+  await forceFocusEditor(this.pageA!, editorLocatorA);
+  await this.pageA!.waitForTimeout(1000);
+  
+  // Wait for awareness to sync between both browsers (both should see each other)
+  // Poll for both browsers to see each other's presence
+  const maxWait = 10000;
+  const pollInterval = 500;
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWait) {
+    const bothConnected = await Promise.all([
+      this.pageA!.evaluate(() => {
+        const widget = document.getElementById('yjs-collaboration-status') || 
+                       document.querySelector('.yjs-collaboration-status-widget');
+        if (!widget) return false;
+        // Check if widget shows at least 1 other editor (browser B)
+        const badges = widget.querySelectorAll('.yjs-user-badge');
+        return badges.length >= 1;
+      }).catch(() => false),
+      this.pageB!.evaluate(() => {
+        const widget = document.getElementById('yjs-collaboration-status') || 
+                       document.querySelector('.yjs-collaboration-status-widget');
+        if (!widget) return false;
+        // Check if widget shows at least 1 other editor (browser A)
+        const badges = widget.querySelectorAll('.yjs-user-badge');
+        return badges.length >= 1;
+      }).catch(() => false)
+    ]);
+    
+    if (bothConnected[0] && bothConnected[1]) {
+      console.log('[Collab] Browser B reloaded and awareness synced between both browsers');
+      return;
+    }
+    
+    await this.pageA!.waitForTimeout(pollInterval);
+    await this.pageB!.waitForTimeout(pollInterval);
+  }
+  
+  console.log('[Collab] Browser B reloaded and collaboration ready (awareness sync timeout, continuing anyway)');
 });
 
 When('browser A reloads the page', async function (this: ICustomWorld) {

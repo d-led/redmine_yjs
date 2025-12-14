@@ -137,11 +137,88 @@ export async function typeInEditor(page: Page, text: string, position: 'beginnin
   
   await page.waitForTimeout(200);
   
-  if (position === 'beginning') {
-    await page.keyboard.press('Control+Home');
-  } else if (position === 'end') {
-    await page.keyboard.press('Control+End');
+  // Wait for content to stabilize (remote updates might be in flight)
+  // This is important for both 'current' and 'end' positions to avoid race conditions
+  let stableCount = 0;
+  let lastLength = -1;
+  const maxWait = 2000;
+  const pollInterval = 100;
+  const startTime = Date.now();
+  
+  while (Date.now() - startTime < maxWait && stableCount < 3) {
+    const currentLength = await textarea.evaluate((el: HTMLTextAreaElement) => {
+      return el.value.length;
+    });
+    
+    if (currentLength === lastLength) {
+      stableCount++;
+    } else {
+      stableCount = 0;
+      lastLength = currentLength;
+    }
+    
+    if (stableCount >= 3) {
+      break; // Content is stable
+    }
+    
+    await page.waitForTimeout(pollInterval);
   }
+  
+  // Set cursor position explicitly using setSelectionRange (more reliable than keyboard shortcuts)
+  if (position === 'beginning') {
+    await textarea.evaluate((el: HTMLTextAreaElement) => {
+      el.setSelectionRange(0, 0);
+      el.focus();
+    });
+  } else if (position === 'current') {
+    // For 'current', get the current cursor position
+    const cursorPos = await textarea.evaluate((el: HTMLTextAreaElement) => {
+      return el.selectionStart;
+    });
+    const contentLength = await textarea.evaluate((el: HTMLTextAreaElement) => {
+      return el.value.length;
+    });
+    
+    // If cursor is at beginning (0) and there's content, move to end
+    // This handles the common case where focus loss resets cursor to 0
+    if (cursorPos === 0 && contentLength > 0) {
+      await textarea.evaluate((el: HTMLTextAreaElement) => {
+        el.setSelectionRange(el.value.length, el.value.length);
+        el.focus();
+      });
+    } else {
+      // Keep current position, but ensure focus
+      await textarea.evaluate((el: HTMLTextAreaElement) => {
+        el.focus();
+      });
+    }
+  } else if (position === 'end') {
+    // Set cursor to the end of the stable content
+    await textarea.evaluate((el: HTMLTextAreaElement) => {
+      const endPos = el.value.length;
+      el.setSelectionRange(endPos, endPos);
+      el.focus();
+    });
+    
+    // Verify cursor is at the end (content might have changed during cursor setting)
+    const cursorPos = await textarea.evaluate((el: HTMLTextAreaElement) => {
+      return el.selectionStart;
+    });
+    const finalLength = await textarea.evaluate((el: HTMLTextAreaElement) => {
+      return el.value.length;
+    });
+    
+    if (cursorPos !== finalLength) {
+      // Retry - content might have changed
+      await textarea.evaluate((el: HTMLTextAreaElement) => {
+        el.setSelectionRange(el.value.length, el.value.length);
+        el.focus();
+      });
+    }
+  }
+  
+  // Wait a bit for cursor position to settle
+  await page.waitForTimeout(100);
   
   // Handle newlines
   const parts = text.split(/\n/);

@@ -11,6 +11,7 @@ Feature: Wiki page collaborative editing
     Scenario: Two users collaborate on a wiki page
         Given user "admin" opens the wiki page edit in browser A
         And user "admin" opens the same wiki page edit in browser B
+        And the editor is empty
         When user types "Wiki content from A" in browser A's editor
         Then browser B's editor shows "Wiki content from A"
         When user types " | Wiki content from B" in browser B's editor

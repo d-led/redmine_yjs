@@ -1173,18 +1173,22 @@
       const yjsValue = ytext.toString();
       
       if (currentValue !== yjsValue) {
-        // Simply update the content - let Yjs CRDT handle merging
-        // The browser will preserve cursor position naturally
-        // We don't manually adjust cursors here - that's what awareness is for
+        // Update content - Yjs CRDT handles merging automatically
+        // Cursor positions are communicated via awareness, NOT by adjusting cursor on content changes
+        // See: https://docs.yjs.dev/getting-started/adding-awareness
+        // We should NOT adjust cursor position based on remote content changes
         const currentCursorPos = textarea.selectionStart;
         textarea.value = yjsValue;
         
-        // Only clamp cursor if it's beyond the new content length
-        // This is a safety measure, not cursor adjustment logic
+        // Only clamp cursor if it's beyond the new content length (safety measure)
+        // Otherwise, let the browser preserve the cursor position naturally
+        // The browser's default behavior is correct - it preserves cursor position relative to content
         if (currentCursorPos > yjsValue.length) {
           textarea.setSelectionRange(yjsValue.length, yjsValue.length);
         }
-        // Otherwise, let the browser preserve the cursor position naturally
+        // Note: If cursor was at position 5 and someone inserts text before position 5,
+        // the browser will naturally move the cursor forward. This is correct behavior.
+        // We should NOT manually adjust it - that would interfere with the user's cursor position.
         
         $(textarea).trigger('change');
       }
