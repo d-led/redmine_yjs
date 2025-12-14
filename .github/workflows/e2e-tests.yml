@@ -35,23 +35,22 @@ jobs:
     name: E2E Tests - Redmine ${{ matrix.redmine_tag }} (Ruby ${{ matrix.ruby_version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event.inputs.full == 'true' || matrix.redmine_tag == '6.0'
     
     strategy:
       fail-fast: false
       matrix:
-        ${{ (github.event.inputs.full == 'true') && fromJSON('{
-          "include": [
-            {"redmine_tag": "7.0", "ruby_version": "3.2"},
-            {"redmine_tag": "6.1", "ruby_version": "3.1"},
-            {"redmine_tag": "6.0", "ruby_version": "3.0"},
-            {"redmine_tag": "5.1", "ruby_version": "2.7"},
-            {"redmine_tag": "5.0", "ruby_version": "2.7"}
-          ]
-        }') || fromJSON('{
-          "include": [
-            {"redmine_tag": "6.0", "ruby_version": "3.0"}
-          ]
-        }') }}
+        include:
+          - redmine_tag: '7.0'
+            ruby_version: '3.2'
+          - redmine_tag: '6.1'
+            ruby_version: '3.1'
+          - redmine_tag: '6.0'
+            ruby_version: '3.0'
+          - redmine_tag: '5.1'
+            ruby_version: '2.7'
+          - redmine_tag: '5.0'
+            ruby_version: '2.7'
 
     steps:
       - name: Checkout plugin
