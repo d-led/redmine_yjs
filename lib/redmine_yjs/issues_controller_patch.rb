@@ -46,7 +46,7 @@ module RedmineYjs
           update_without_yjs
         rescue ActiveRecord::StaleObjectError => e
           if yjs_enabled?
-            # Fallback: if stale error still occurs (shouldn't happen with above logic)
+            # Fallback: if stale error still occurs, redirect to merge and retry
             if @issue && params[:issue]
               # Determine which field was being edited
               field = params[:issue].key?(:description) ? :description : :notes
@@ -61,8 +61,9 @@ module RedmineYjs
               # Update lock_version to current
               params[:issue][:lock_version] = @issue.lock_version
               
-              # Retry the update
-              update_without_yjs
+              # Redirect back to edit page - JavaScript will merge and auto-retry
+              redirect_to edit_issue_path(@issue),
+                          notice: l(:notice_merging_changes)
             else
               raise e
             end
