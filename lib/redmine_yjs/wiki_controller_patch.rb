@@ -13,11 +13,13 @@ module RedmineYjs
             # Check if lock_version is present (indicates optimistic locking is active)
             if params[:content][:lock_version]
               # Reload to get latest lock_version and content from database
+              old_lock_version = @content.lock_version
               old_text = @content.text
               @content.reload
               
-              # If content changed in database, redirect to merge and retry
-              if old_text != @content.text
+              # Only redirect for merge if lock_version changed (actual conflict)
+              # Don't redirect just for content differences - let the save proceed normally
+              if old_lock_version != @content.lock_version && old_text != @content.text
                 # Store saved content in flash to signal JavaScript to merge
                 flash[:yjs_merge_content] = @content.text
                 flash[:yjs_merge_document] = yjs_document_name
@@ -32,7 +34,7 @@ module RedmineYjs
                 return
               end
               
-              # Content didn't change, just update lock_version to bypass stale check
+              # No conflict or content didn't change, just update lock_version to bypass stale check
               params[:content][:lock_version] = @content.lock_version
             end
           end

@@ -16,11 +16,13 @@ module RedmineYjs
               field = params[:issue].key?(:description) ? :description : :notes
               
               # Reload to get latest lock_version and content from database
+              old_lock_version = @issue.lock_version
               old_content = @issue.send(field)
               @issue.reload
               
-              # If content changed in database, redirect to merge and retry
-              if old_content != @issue.send(field)
+              # Only redirect for merge if lock_version changed (actual conflict)
+              # Don't redirect just for content differences - let the save proceed normally
+              if old_lock_version != @issue.lock_version && old_content != @issue.send(field)
                 # Store saved content in flash to signal JavaScript to merge
                 flash[:yjs_merge_content] = @issue.send(field)
                 flash[:yjs_merge_document] = yjs_document_name(field)
@@ -35,7 +37,7 @@ module RedmineYjs
                 return
               end
               
-              # Content didn't change, just update lock_version to bypass stale check
+              # No conflict or content didn't change, just update lock_version to bypass stale check
               params[:issue][:lock_version] = @issue.lock_version
             end
           end

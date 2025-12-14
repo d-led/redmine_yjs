@@ -1187,20 +1187,34 @@
         // Update content - Yjs CRDT handles merging automatically
         // Cursor positions are communicated via awareness, NOT by adjusting cursor on content changes
         // See: https://docs.yjs.dev/getting-started/adding-awareness
-        // We should NOT adjust cursor position based on remote content changes
         textarea.value = yjsValue;
         
-        // Only clamp cursor if it's beyond the new content length (safety measure)
-        // Otherwise, let the browser preserve the cursor position naturally
-        // The browser's default behavior is correct - it preserves cursor position relative to content
-        const maxPos = yjsValue.length;
-        if (currentCursorPos > maxPos || currentSelectionEnd > maxPos) {
-          // Position is out of bounds, clamp to end
-          textarea.setSelectionRange(maxPos, maxPos);
+        // Explicitly preserve cursor position when textarea is focused
+        // Setting textarea.value resets cursor to end, so we need to restore it
+        if (isFocused) {
+          const maxPos = yjsValue.length;
+          // Only restore if cursor was within the original content bounds
+          // This prevents cursor from jumping if content was deleted before it
+          if (currentCursorPos <= currentValue.length) {
+            // Calculate the offset: how much content was inserted/deleted before cursor
+            // Simple approach: try to preserve relative position
+            const ratio = currentValue.length > 0 ? currentCursorPos / currentValue.length : 0;
+            const newPos = Math.round(ratio * maxPos);
+            const safePos = Math.min(newPos, maxPos);
+            const safeEnd = Math.min(currentSelectionEnd <= currentValue.length ? 
+              Math.round((currentSelectionEnd / currentValue.length) * maxPos) : safePos, maxPos);
+            textarea.setSelectionRange(safePos, safeEnd);
+          } else {
+            // Cursor was beyond content, clamp to end
+            textarea.setSelectionRange(maxPos, maxPos);
+          }
+        } else {
+          // Not focused - only clamp if out of bounds
+          const maxPos = yjsValue.length;
+          if (currentCursorPos > maxPos || currentSelectionEnd > maxPos) {
+            textarea.setSelectionRange(maxPos, maxPos);
+          }
         }
-        // Note: If cursor was at position 5 and someone inserts text before position 5,
-        // the browser will naturally move the cursor forward. This is correct behavior.
-        // We should NOT manually adjust it - that would interfere with the user's cursor position.
         
         $(textarea).trigger('change');
       }
@@ -2649,17 +2663,84 @@
     
     function tryMerge() {
       if (window.RedmineYjs && window.RedmineYjs.mergeExternalContent) {
-        const merged = window.RedmineYjs.mergeExternalContent(documentName, content);
-        if (merged && autoRetry) {
-          // Auto-retry the save after merge completes
-          setTimeout(() => {
-            const form = document.querySelector('form[action*="wiki"], form#wiki_form, form[action*="issues"], form#issue-form');
-            if (form) {
-              console.log('[Yjs] Auto-retrying save after merge');
-              form.submit();
-            }
-          }, 500);
+        // Find collaboration to get current content before merge
+        let collaboration = null;
+        for (const [element, collab] of activeCollaborations.entries()) {
+          if (collab.documentName === documentName) {
+            collaboration = collab;
+            break;
+          }
         }
+        
+        const contentBeforeMerge = collaboration ? collaboration.ytext.toString() : '';
+        
+        // Show prominent feedback about merge
+        // Try to find existing notice, or create one
+        let notice = document.querySelector('.flash.notice, .flash.info, #content .flash');
+        if (!notice) {
+          // Create a notice element if it doesn't exist
+          const contentArea = document.querySelector('#content, .main, body');
+          if (contentArea) {
+            notice = document.createElement('div');
+            notice.className = 'flash notice';
+            notice.id = 'yjs-merge-notice';
+            const firstChild = contentArea.firstElementChild;
+            if (firstChild) {
+              contentArea.insertBefore(notice, firstChild);
+            } else {
+              contentArea.appendChild(notice);
+            }
+          }
+        }
+        
+        if (notice) {
+          notice.style.backgroundColor = '#fff3cd';
+          notice.style.border = '3px solid #ffc107';
+          notice.style.padding = '15px';
+          notice.style.fontWeight = 'bold';
+          notice.style.fontSize = '14px';
+          notice.style.marginBottom = '15px';
+          notice.style.display = 'block';
+          notice.innerHTML = '⚠️ <strong>Merge in progress:</strong> Another user saved changes while you were editing. Merging your changes with theirs...';
+        }
+        
+        const merged = window.RedmineYjs.mergeExternalContent(documentName, content);
+        
+        if (merged) {
+          const contentAfterMerge = collaboration ? collaboration.ytext.toString() : '';
+          const hasChanges = contentBeforeMerge !== contentAfterMerge;
+          
+          // Update notice with merge result
+          if (notice) {
+            if (hasChanges) {
+              notice.style.backgroundColor = '#d1ecf1';
+              notice.style.border = '3px solid #0c5460';
+              notice.innerHTML = '✅ <strong>Merge completed!</strong> Your changes have been merged with the saved version. The editor now shows the merged content. Please review and save when ready.';
+            } else {
+              notice.style.backgroundColor = '#d4edda';
+              notice.style.border = '3px solid #155724';
+              notice.innerHTML = '✅ <strong>No merge needed:</strong> Your changes are already up to date with the saved version.';
+            }
+          }
+          
+          if (autoRetry) {
+            // Auto-retry the save after merge completes (with delay to let user see the message)
+            setTimeout(() => {
+              const form = document.querySelector('form[action*="wiki"], form#wiki_form, form[action*="issues"], form#issue-form');
+              if (form) {
+                console.log('[Yjs] Auto-retrying save after merge');
+                // Update notice before submitting
+                if (notice) {
+                  notice.style.backgroundColor = '#d1ecf1';
+                  notice.style.border = '3px solid #0c5460';
+                  notice.innerHTML = '💾 <strong>Saving merged changes...</strong>';
+                }
+                form.submit();
+              }
+            }, 1500); // Give user time to see the merge result
+          }
+        }
+        
         // Remove merge data script after processing
         mergeDataScript.remove();
         return true;
