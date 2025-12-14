@@ -2461,11 +2461,10 @@
       const computedStyle = window.getComputedStyle(textarea);
       const isActuallyHidden = computedStyle.display === 'none' || computedStyle.visibility === 'hidden';
       
-      // For hidden textareas on issue show pages, still initialize (form will become visible)
-      // Only skip if it's truly hidden and we're not on an issue show page
-      const isIssueShowPage = /\/issues\/\d+$/.test(window.location.pathname);
-      
-      if (isActuallyHidden && !isIssueShowPage) {
+      // Initialize collaboration for all eligible textareas, regardless of visibility
+      // Textareas may be hidden initially but become visible when user clicks "Edit"
+      // Collaboration will sync properly when the textarea becomes visible
+      if (isActuallyHidden) {
         if (hasCKEditor) {
           // CKEditor is ready, initialize it
           console.log('[Yjs] 🔍 Found hidden textarea with CKEditor instance:', editorId);
@@ -2474,14 +2473,10 @@
           console.log('[Yjs] ⏳ CKEditor not ready yet for:', editorId, '- will retry on instanceReady');
           // Don't skip - let initYjsCollaboration handle the wait
         } else {
-          // No CKEditor at all, skip hidden textarea (unless it's an issue show page)
-          console.log('[Yjs] ⏭️ Skipping hidden textarea (no CKEditor):', editorId);
-          return;
+          // Plain text editor - initialize even if hidden (form may become visible)
+          console.log('[Yjs] 🔍 Found hidden textarea (plain text), will initialize (form may become visible):', editorId);
         }
-      } else if (isActuallyHidden && isIssueShowPage) {
-        // On issue show pages, initialize even if hidden (form will become visible)
-        console.log('[Yjs] 🔍 Found hidden textarea on issue show page, will initialize (form will become visible):', editorId);
-      } else if (!isActuallyHidden) {
+      } else {
         console.log('[Yjs] ✅ Found visible textarea:', editorId);
       }
       
@@ -2505,9 +2500,9 @@
         // Widget will be updated by onConnect/onStatus callbacks
         } else {
         console.warn('[Yjs] ✗ Failed to initialize collaboration for document:', documentName);
-        // Don't update widget here - might be waiting for CKEditor
-        if (!isHidden || hasCKEditor) {
-          // Only show error if not waiting for CKEditor
+        // Only show error for visible textareas or when CKEditor is present
+        // Hidden textareas might not be visible to the user yet, so don't show errors immediately
+        if (!isActuallyHidden || hasCKEditor) {
           updateCollaborationStatusWidget('disconnected', 'Failed to initialize');
         }
       }

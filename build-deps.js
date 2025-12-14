@@ -4,9 +4,13 @@
  * This creates a bundled file that can be used instead of CDN
  */
 
-const esbuild = require('esbuild');
-const path = require('path');
-const fs = require('fs');
+import esbuild from 'esbuild';
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const outputDir = path.join(__dirname, 'assets/javascripts');
 const outputFile = path.join(outputDir, 'yjs-deps.bundle.js');

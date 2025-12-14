@@ -150,13 +150,15 @@ module RedmineYjs
         result << view.javascript_tag(config_script).html_safe
         
         # Load dependencies: prefer bundled version, fallback to CDN
-        # Check if bundled dependencies exist (built with esbuild)
-        bundled_deps_path = File.join(Rails.root, 'public', 'plugin_assets', 'redmine_yjs', 'javascripts', 'yjs-deps.bundle.js')
-        if File.exist?(bundled_deps_path)
+        # Check for bundled dependencies in plugin assets directory first, then public/plugin_assets
+        bundled_deps_plugin = File.join(RedmineYjs.root, 'assets', 'javascripts', 'yjs-deps.bundle.js')
+        bundled_deps_public = File.join(Rails.root, 'public', 'plugin_assets', 'redmine_yjs', 'javascripts', 'yjs-deps.bundle.js')
+        
+        if File.exist?(bundled_deps_plugin) || File.exist?(bundled_deps_public)
           Rails.logger.info "[Yjs Hook] Using bundled dependencies"
-          assets_root = RedmineYjs.assets_root
-          # Load bundled deps synchronously - must load before our script
-          result << view.javascript_include_tag("#{assets_root}/javascripts/yjs-deps.bundle.js", defer: false).html_safe
+          # Use plugin: option - Redmine will serve from assets/javascripts/ automatically
+          # The file is at assets/javascripts/yjs-deps.bundle.js
+          result << view.javascript_include_tag('yjs-deps.bundle', plugin: 'redmine_yjs', defer: false).html_safe
         else
           Rails.logger.info "[Yjs Hook] Using CDN dependencies (bundled version not found)"
           # Use esm.sh CDN which provides UMD builds - load synchronously (no defer)

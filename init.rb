@@ -66,6 +66,9 @@ Redmine::Plugin.register :redmine_yjs do
   )
 end
 
-# Assets are copied during Docker build, not at runtime
-# See redmine/Dockerfile for asset copying
+# Automatically copy assets to public/plugin_assets on plugin load
+# This ensures assets are available without manual copying
+ActiveSupport::Reloader.to_prepare do
+  RedmineYjs.copy_assets_to_public
+end
 

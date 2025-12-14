@@ -24,31 +24,55 @@ This plugin addresses a long-standing feature request for real-time collaborativ
 | 5.0.x           | 1.0.0+         | ⚠️ Might work (untested) |
 | 4.x and earlier | -              | ❌ Not supported         |
 
-### Requirements
+## Prerequisites
 
-- **Ruby**: 3.0+ (same as Redmine 5.x/6.x)
-- **Rails**: 6.1+ (same as Redmine 5.x/6.x)
-- **Node.js**: 18+ (for Hocuspocus server)
-- **Browser**: Modern browsers with WebSocket support
+### For Plugin Installation
+
+The plugin itself requires **no additional prerequisites** beyond your existing Redmine installation:
+
+- **Redmine**: 5.0+ (tested on 6.0.x)
+- **Ruby**: 3.0+ (comes with Redmine 5.x/6.x)
+- **Rails**: 6.1+ (comes with Redmine 5.x/6.x)
+
+Assets are pre-built and included in the repository, so **Node.js is not required** for installation.
+
+### For Full Functionality
+
+To use collaborative editing, you also need:
+
+- **Hocuspocus WebSocket Server**: A separate Node.js service (see [Hocuspocus Deployment](#hocuspocus-deployment))
+  - **Node.js**: 18+ (only needed for running the Hocuspocus server, not for the plugin itself)
+- **Browser**: Modern browsers with WebSocket support (Chrome, Firefox, Safari, Edge)
+
+### For Development
+
+If you want to modify and rebuild assets:
+
+- **Node.js**: 18+
+- **npm**: Comes with Node.js
 
 ## Installation
 
 ### 1. Install the Plugin
 
+Simply checkout the plugin into your Redmine plugins directory:
+
 ```bash
 cd /path/to/redmine/plugins
 git clone https://github.com/your-org/redmine_yjs.git
+```
 
-# Copy assets (Redmine 6.x)
-mkdir -p ../public/plugin_assets/redmine_yjs
-cp -r redmine_yjs/assets/* ../public/plugin_assets/redmine_yjs/
+The plugin will automatically copy its assets on first load. Then:
 
-# Run migrations
+```bash
+# Run migrations (if any)
 cd /path/to/redmine
 bundle exec rake redmine:plugins:migrate RAILS_ENV=production
 
 # Restart Redmine
 ```
+
+That's it! The plugin is now installed and ready to use.
 
 ### 2. Deploy Hocuspocus Server
 
@@ -160,13 +184,50 @@ curl http://localhost:8081/health  # → OK
 
 ## Development
 
+### Quick Setup
+
+Run the setup script to ensure everything is ready:
+
+```bash
+cd plugins/redmine_yjs
+./scripts/setup.sh
+```
+
+This will:
+- Check for Node.js/npm
+- Install Node.js dependencies
+- Build assets automatically
+- Verify the setup
+
 ### Building Bundled Dependencies
 
+**Option 1: Using build script (recommended)**
+```bash
+cd plugins/redmine_yjs
+./scripts/build-js.sh
+```
+
+**Option 2: Using npm directly**
 ```bash
 cd plugins/redmine_yjs
 npm install
 npm run build:deps
 ```
+
+**Option 3: Using Rake (from Redmine root)**
+```bash
+# Build assets
+bundle exec rake redmine_yjs:build_assets
+
+# Copy assets to public directory
+bundle exec rake redmine_yjs:copy_assets
+
+# Or do both
+bundle exec rake redmine_yjs:setup
+```
+
+**Option 4: Automatic (on plugin load)**
+Assets are automatically built if missing when the plugin loads (requires Node.js).
 
 ### Version Management
 
