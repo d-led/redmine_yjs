@@ -53,7 +53,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=
-            type=raw,value=latest,enable=true
+            type=raw,value=latest,enable={{is_tag}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
