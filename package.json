@@ -3,12 +3,16 @@
   "version": "1.0.0",
   "description": "Yjs collaborative editing plugin for Redmine",
   "private": true,
+  "type": "module",
   "scripts": {
     "build": "node build.js",
-    "build:deps": "node build-deps.js"
+    "build:deps": "node build-deps.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
-    "esbuild": "^0.27.1"
+    "esbuild": "^0.27.1",
+    "vitest": "^4.0.15"
   },
   "dependencies": {
     "@hocuspocus/provider": "^3.4.1",

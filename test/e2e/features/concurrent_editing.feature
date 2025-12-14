@@ -79,3 +79,28 @@ Feature: Concurrent collaborative editing
         Then browser A's editor shows "Before reload - After reload from A - And from B"
         And browser B's editor shows "Before reload - After reload from A - And from B"
 
+    @ui
+    Scenario: Changes merge when another user saves while editing
+        Given user "admin" opens the issue in browser A
+        And user "admin" opens the same issue in browser B
+        And the editor is empty
+        # User A starts editing
+        When user types "Content from A" in browser A's editor
+        Then browser B's editor shows "Content from A"
+        # User B adds content and saves (this updates the database)
+        When user types " | Saved by B" in browser B's editor
+        Then browser A's editor shows "Content from A | Saved by B"
+        When user saves the issue in browser B
+        # User A continues editing (has unsaved changes)
+        When user types " | Added after B saved" in browser A's editor
+        Then browser A's editor shows "Content from A | Saved by B | Added after B saved"
+        # User A saves - this should trigger merge with B's saved content
+        When user saves the issue in browser A
+        # After save, verify the merged content is saved correctly
+        # Browser A is redirected after save, so navigate back to edit
+        Given user "admin" opens the issue in browser A
+        Then browser A's editor shows "Content from A | Saved by B | Added after B saved"
+        # Browser B should also see the final merged content when navigating to edit
+        Given user "admin" opens the same issue in browser B
+        Then browser B's editor shows "Content from A | Saved by B | Added after B saved"
+

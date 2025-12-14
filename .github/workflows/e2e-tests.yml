@@ -40,13 +40,32 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Cache npm dependencies
+      - name: Cache npm dependencies (plugin)
         uses: actions/cache@v4
         with:
           path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('test/e2e/package-lock.json', 'test/e2e/package.json') }}
+          key: ${{ runner.os }}-node-plugin-${{ hashFiles('package-lock.json', 'package.json') }}
           restore-keys: |
-            ${{ runner.os }}-node-
+            ${{ runner.os }}-node-plugin-
+
+      - name: Install plugin dependencies
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Run unit tests
+        run: npm test
+
+      - name: Cache npm dependencies (e2e)
+        uses: actions/cache@v4
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node-e2e-${{ hashFiles('test/e2e/package-lock.json', 'test/e2e/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-e2e-
 
       - name: Install test dependencies
         working-directory: test/e2e

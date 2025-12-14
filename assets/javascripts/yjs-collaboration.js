@@ -2510,6 +2510,174 @@
     }
   }
 
+  /**
+   * Merge external content (from database) with Yjs document
+   * This is called when someone saves while another user is editing
+   * 
+   * The merge handles two scenarios:
+   * 1. Saved content was previously in Yjs (normal case) - CRDTs merge automatically
+   * 2. Saved content was never in Yjs (e.g., saved directly without Yjs) - we need to diff and apply changes
+   */
+  function mergeExternalContent(documentName, externalContent) {
+    console.log('[Yjs] 🔀 Merging external content for document:', documentName);
+    console.log('[Yjs] External content length:', externalContent?.length || 0);
+    
+    // Find the collaboration for this document
+    let collaboration = null;
+    for (const [element, collab] of activeCollaborations.entries()) {
+      if (collab.documentName === documentName) {
+        collaboration = collab;
+        break;
+      }
+    }
+    
+    if (!collaboration) {
+      console.warn('[Yjs] No active collaboration found for document:', documentName);
+      return false;
+    }
+    
+    const { ydoc, ytext } = collaboration;
+    const currentContent = ytext.toString();
+    
+    // If content is the same, no merge needed
+    if (currentContent === externalContent) {
+      console.log('[Yjs] Content already matches, no merge needed');
+      return true;
+    }
+    
+    // Strategy: Merge external content (from database) with current Yjs document
+    // 
+    // This handles two scenarios:
+    // 1. Saved content was previously in Yjs (normal collaborative editing case)
+    //    - Yjs CRDTs merge automatically based on shared history
+    // 2. Saved content was never in Yjs (e.g., saved directly without Yjs, or before Yjs was initialized)
+    //    - We create a temporary Y.Doc and merge it - Yjs CRDTs can merge independent states
+    //    - However, this may not preserve all local changes if content diverged significantly
+    //
+    // Note: The merge works best when the saved content was at least partially in Yjs before.
+    // If the saved content is completely new (never in Yjs), the merge might not be perfect,
+    // but Yjs will do its best to merge the states.
+    
+    // Save current cursor position if editor is focused
+    let cursorPosition = null;
+    try {
+      if (collaboration.element && collaboration.element === document.activeElement) {
+        cursorPosition = collaboration.element.selectionStart;
+      }
+    } catch (e) {
+      // Ignore errors getting cursor position
+    }
+    
+    // Create a temporary Y.Doc with the external content
+    // This represents the state that was saved to the database
+    const tempDoc = new Y.Doc();
+    const tempYtext = tempDoc.getText('content');
+    
+    // Insert external content into temp document
+    tempYtext.insert(0, externalContent || '');
+    
+    // Get the update from temp document
+    const update = Y.encodeStateAsUpdate(tempDoc);
+    
+    // Apply the update to the current document
+    // Yjs CRDTs will merge the content, attempting to preserve both:
+    // - The saved content from the database
+    // - Any local unsaved changes in the current Yjs document
+    // 
+    // This works because Yjs uses CRDTs (Conflict-free Replicated Data Types) that can
+    // merge independent states. However, if the content diverged significantly and was
+    // never in Yjs before, the merge might not be perfect.
+    Y.applyUpdate(ydoc, update);
+    
+    // Restore cursor position if it was saved
+    if (cursorPosition !== null && collaboration.element) {
+      try {
+        const newLength = ytext.toString().length;
+        const safePosition = Math.min(cursorPosition, newLength);
+        collaboration.element.setSelectionRange(safePosition, safePosition);
+      } catch (e) {
+        // Ignore errors setting cursor position
+      }
+    }
+    
+    console.log('[Yjs] ✅ Merged external content with local changes');
+    console.log('[Yjs] Before merge:', currentContent.substring(0, 50));
+    console.log('[Yjs] After merge:', ytext.toString().substring(0, 50));
+    
+    return true;
+  }
+  
+  // Expose merge function globally so it can be called from hooks
+  if (typeof window.RedmineYjs === 'undefined') {
+    window.RedmineYjs = {};
+  }
+  window.RedmineYjs.mergeExternalContent = mergeExternalContent;
+  
+  /**
+   * Process merge data from JSON script tag (set by Ruby hooks)
+   * This is called when someone saves while another user is editing
+   */
+  function processMergeData() {
+    // Read merge data from JSON script tag
+    const mergeDataScript = document.getElementById('yjs-merge-data');
+    if (!mergeDataScript) {
+      return;
+    }
+    
+    let mergeData;
+    try {
+      mergeData = JSON.parse(mergeDataScript.textContent);
+    } catch (e) {
+      console.error('[Yjs] Failed to parse merge data:', e);
+      return;
+    }
+    
+    const { document, content, autoRetry } = mergeData;
+    console.log('[Yjs] Processing merge data for:', document, 'autoRetry:', autoRetry);
+    
+    function tryMerge() {
+      if (window.RedmineYjs && window.RedmineYjs.mergeExternalContent) {
+        const merged = window.RedmineYjs.mergeExternalContent(document, content);
+        if (merged && autoRetry) {
+          // Auto-retry the save after merge completes
+          setTimeout(() => {
+            const form = document.querySelector('form[action*="wiki"], form#wiki_form, form[action*="issues"], form#issue-form');
+            if (form) {
+              console.log('[Yjs] Auto-retrying save after merge');
+              form.submit();
+            }
+          }, 500);
+        }
+        // Remove merge data script after processing
+        mergeDataScript.remove();
+        return true;
+      }
+      return false;
+    }
+    
+    // Try immediately
+    if (!tryMerge()) {
+      // Yjs not ready yet, retry periodically
+      let attempts = 0;
+      const maxAttempts = 20; // 10 seconds max
+      const interval = setInterval(() => {
+        attempts++;
+        if (tryMerge() || attempts >= maxAttempts) {
+          clearInterval(interval);
+        }
+      }, 500);
+    }
+  }
+  
+  // Process merge data when Yjs is initialized
+  // Wait a bit for collaborations to initialize
+  setTimeout(processMergeData, 1000);
+  
+  // Also process immediately if merge data exists (in case Yjs is already initialized)
+  if (document.getElementById('yjs-merge-data')) {
+    processMergeData();
+  }
+
   // Initialize when DOM is ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initAllEditors);

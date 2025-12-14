@@ -1073,3 +1073,51 @@ Then('browser B\'s editor does not show {string}', async function (this: ICustom
   expect(content).not.toContain(unexpectedText);
 });
 
+async function saveIssue(page: Page, browser: string): Promise<void> {
+  console.log(`[Collab] Saving issue in browser ${browser}...`);
+  
+  // Find and click the save/submit button
+  // Redmine uses different button names: "commit", "Save", or button with type="submit"
+  const saveButton = page.locator('input[type="submit"][name="commit"], input[type="submit"][value*="Save"], button[type="submit"]:has-text("Save"), input[type="submit"]').first();
+  
+  // Wait for button to be visible
+  await saveButton.waitFor({ state: 'visible', timeout: 10000 });
+  
+  // Click the save button
+  await saveButton.click();
+  
+  // Wait for save to complete - either success page or back to edit page
+  // If merge happens, we'll be redirected back to edit page with a notice
+  await page.waitForLoadState('networkidle', { timeout: 15000 });
+  
+  // Wait a bit for any merge operations to complete
+  await page.waitForTimeout(2000);
+  
+  // If we're still on an edit page (merge happened), wait for merge to complete
+  const currentUrl = page.url();
+  if (currentUrl.includes('/edit') || currentUrl.includes('/issues/')) {
+    // Check if there's a merge notice
+    const mergeNotice = page.locator('text=/merging|merge/i').first();
+    try {
+      await mergeNotice.waitFor({ state: 'visible', timeout: 3000 });
+      console.log('[Collab] Merge notice detected, waiting for merge to complete...');
+      // Wait for merge to complete (JavaScript will auto-retry save)
+      await page.waitForTimeout(5000);
+      // Check if we're redirected (save completed)
+      await page.waitForLoadState('networkidle', { timeout: 10000 });
+    } catch (e) {
+      // No merge notice, save completed normally
+    }
+  }
+  
+  console.log(`[Collab] Issue saved in browser ${browser}`);
+}
+
+When('user saves the issue in browser A', async function (this: ICustomWorld) {
+  await saveIssue(this.pageA!, 'A');
+});
+
+When('user saves the issue in browser B', async function (this: ICustomWorld) {
+  await saveIssue(this.pageB!, 'B');
+});
+

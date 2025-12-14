@@ -6,3 +6,5 @@ en:
   
   text_yjs_enabled_help: "Enable or disable Yjs collaborative editing in Redmine editors"
   text_hocuspocus_url_help: "WebSocket URL browsers connect to (e.g., ws://localhost:8081/ws or wss://hocuspocus.example.com/ws). Use a reverse proxy to serve /ws through Redmine's URL if needed."
+  
+  notice_merging_changes: "Changes from another user detected. Merging with your edits..."

@@ -100,6 +100,21 @@ module RedmineYjs
           document_context[:wiki_page_title] = wiki_page[:title] if wiki_page[:title]
         end
         
+        # Check for merge content from stale object error handling
+        merge_content = flash[:yjs_merge_content] rescue nil
+        merge_document = flash[:yjs_merge_document] rescue nil
+        auto_retry = flash[:yjs_auto_retry] rescue false
+        if merge_content && merge_document
+          Rails.logger.info "[Yjs Hook] Merge content detected for document: #{merge_document}, auto_retry: #{auto_retry}"
+          # Store merge data in a JSON script tag (separate resource)
+          merge_data = {
+            document: merge_document,
+            content: merge_content,
+            autoRetry: auto_retry
+          }
+          result << view.content_tag(:script, merge_data.to_json.html_safe, type: 'application/json', id: 'yjs-merge-data').html_safe
+        end
+        
         # Log document context for debugging
         if document_context.any?
           Rails.logger.info "[Yjs Hook] Document context: #{document_context.inspect}"
