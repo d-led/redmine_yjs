@@ -7,16 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Issue saves in collaborative mode no longer show conflict errors or redirects. Conflicts are handled silently by updating the lock version, allowing saves to proceed normally since Yjs CRDTs already handle merging in real-time.
+## [0.0.4] - 2025-12-15
 
 ### Added
 
 - Optional HMAC-signed authentication between Redmine and the bundled Hocuspocus server:
-  - Redmine generates short-lived, document-bound tokens signed with `YJS_TOKEN_SECRET`.
-  - Hocuspocus verifies these tokens on connect and rejects unauthorized clients.
-  - When `YJS_TOKEN_SECRET` is not set, Hocuspocus falls back to a development-only, insecure mode.
+  - Redmine generates short-lived, document-bound tokens signed with a shared secret.
+  - Hocuspocus verifies these tokens on connect and rejects unauthorized clients when a signed token is present.
+  - When no signed token is provided, Hocuspocus logs a warning and falls back to the previous (insecure) behavior to keep development setups working.
+
+### Changed
+
+- Plugin settings now include a `Hocuspocus Token Secret` field that can override the `YJS_TOKEN_SECRET` environment variable for Redmine.
+- E2E Docker Compose now preconfigures a demo `YJS_TOKEN_SECRET` shared between Redmine and Hocuspocus.
+
+## [0.0.3] - 2025-12-15
+
+### Changed
+
+- Issue saves in collaborative mode no longer show conflict errors or redirects. Conflicts are handled silently by updating the lock version, allowing saves to proceed normally since Yjs CRDTs already handle merging in real-time.
 
 ## [0.0.2] - 2025-12-15
 
@@ -35,5 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial version bump from 0.0.1
 
-[Unreleased]: https://github.com/d-led/redmine_yjs/compare/v0.0.2...HEAD
+[Unreleased]: https://github.com/d-led/redmine_yjs/compare/v0.0.4...HEAD
+[0.0.4]: https://github.com/d-led/redmine_yjs/releases/tag/v0.0.4
+[0.0.3]: https://github.com/d-led/redmine_yjs/releases/tag/v0.0.3
 [0.0.2]: https://github.com/d-led/redmine_yjs/releases/tag/v0.0.2

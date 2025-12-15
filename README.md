@@ -153,6 +153,42 @@ When this secret is set:
 
 If `YJS_TOKEN_SECRET` is **not** set, Hocuspocus falls back to a development-only mode that trusts plain JSON identity info from the browser. **Do not use this mode in production.**
 
+#### Minimal Secure Deployment (Docker)
+
+A minimal, reasonably secure Docker-based deployment looks like this:
+
+1. **Run Hocuspocus with a shared secret** (example):
+
+   ```yaml
+   services:
+     hocuspocus:
+       image: ghcr.io/d-led/redmine_yjs-hocuspocus:latest
+       ports:
+         - "8081:8081"
+       environment:
+         PORT: 8081
+         YJS_TOKEN_SECRET: "your-32-byte-random-secret-here"
+   ```
+
+2. **Configure Redmine environment** (e.g. in your Redmine container or systemd service):
+
+   ```bash
+   export HOCUSPOCUS_URL=ws://your-redmine-host:8081/ws   # or proxied /ws URL
+   export YJS_TOKEN_SECRET="your-32-byte-random-secret-here"
+   ```
+
+3. **Configure the plugin in Redmine**:
+
+   - Go to **Administration → Plugins → Redmine Yjs → Configure**.
+   - Set **Hocuspocus WebSocket URL** to match `HOCUSPOCUS_URL` (browser-facing).
+   - Optionally set **Hocuspocus Token Secret** (overrides `YJS_TOKEN_SECRET` in Redmine).
+   - Click **Apply**.
+
+With this setup:
+
+- Only clients that obtained a page from Redmine (and thus a signed token) can join a document’s session.
+- Hocuspocus will reject connections with invalid/expired/mismatched tokens.
+
 ## Usage
 
 Once enabled, collaborative editing works automatically for:
