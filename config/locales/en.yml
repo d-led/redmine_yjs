@@ -3,8 +3,10 @@ en:
   label_yjs_settings: Collaborative Editing Settings
   label_yjs_enabled: Enable Yjs Collaborative Editing
   label_hocuspocus_url: Hocuspocus WebSocket URL
+  label_yjs_token_secret: Hocuspocus Token Secret
   
   text_yjs_enabled_help: "Enable or disable Yjs collaborative editing in Redmine editors"
   text_hocuspocus_url_help: "WebSocket URL browsers connect to (e.g., ws://localhost:8081/ws or wss://hocuspocus.example.com/ws). Use a reverse proxy to serve /ws through Redmine's URL if needed."
+  text_yjs_token_secret_help: "Optional shared HMAC secret used to sign auth tokens for the Hocuspocus server. Must match YJS_TOKEN_SECRET in the Hocuspocus environment if set. Leave blank to use only the environment variable."
   
   notice_merging_changes: "⚠️ Another user saved changes while you were editing. Your changes have been merged with theirs. Please review the merged content below before saving."

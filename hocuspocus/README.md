@@ -55,11 +55,12 @@ curl http://localhost:8081/health
 
 ### Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8081` | Server port |
-| `HOCUSPOCUS_PORT` | `8081` | Alternative port variable |
-| `YJS_ENABLED` | `1` | Enable/disable server |
+| Variable           | Default | Description                                                                                         |
+|--------------------|---------|-----------------------------------------------------------------------------------------------------|
+| `PORT`             | `8081`  | Server port                                                                                        |
+| `HOCUSPOCUS_PORT`  | `8081`  | Alternative port variable                                                                          |
+| `YJS_ENABLED`      | `1`     | Enable/disable server                                                                              |
+| `YJS_TOKEN_SECRET` | _unset_ | Shared HMAC secret for verifying Redmine-issued tokens (`uid`/`login`/`doc`/`exp`) – recommended. |
 
 ## Deploy to Fly.io
 
@@ -84,7 +85,8 @@ flyctl status
 
 Configure in Redmine: **Administration → Plugins → Redmine Yjs → Configure**
 
-Set Hocuspocus URL: `wss://my-hocuspocus.fly.dev`
+- Direct mode: set Hocuspocus URL to something like `ws://localhost:8081/ws`.
+- Proxy mode: set Hocuspocus URL to your Redmine host `/ws`, e.g. `wss://your-redmine-host/ws`, and enable "Proxy WebSocket through Redmine" in plugin settings.
 
 ## Docker Compose Example
 
@@ -134,19 +136,35 @@ flyctl logs -a my-hocuspocus
 
 ## Authentication & Security
 
-### Current Authentication (Toy Implementation)
+### HMAC-Signed Tokens from Redmine
 
-> ⚠️ **Warning:** The current authentication is a **toy implementation** for development/demo purposes only. It provides **no real security**.
-
-The client sends user info as plain JSON when connecting:
+When `YJS_TOKEN_SECRET` is set, Redmine and Hocuspocus share a secret used to sign
+short-lived tokens. For each editable document, Redmine issues a token with payload:
 
 ```json
-{ "id": "user_123", "name": "John Doe" }
+{
+  "uid": 1,
+  "login": "admin",
+  "doc": "issue-1",
+  "exp": 1734280000
+}
 ```
 
-This is **not a token** - it's just unverified identity info for displaying user presence (colored cursors). Anyone can connect and claim to be any user. The server blindly trusts whatever the client sends.
+This JSON is HMAC-SHA256 signed with `YJS_TOKEN_SECRET` and sent to the browser as a
+compact `payload.signature` string (both parts base64url-encoded). The browser passes
+this token as `token` to `HocuspocusProvider`. On connect, Hocuspocus:
 
-**Do NOT use this in production without a reverse proxy that enforces authentication.**
+- Verifies the HMAC signature.
+- Checks `exp` is in the future.
+- Checks `doc` matches the actual document name being opened.
+
+If any check fails, the connection is rejected (`Unauthorized`). This prevents
+spurious clients from connecting to other users' sessions even if they know the
+Hocuspocus URL.
+
+If `YJS_TOKEN_SECRET` is **not** set, Hocuspocus falls back to a development-only
+mode that trusts plain JSON identity info from the browser. **Do not use this mode
+in production.**
 
 ### Production Security with Reverse Proxy
 

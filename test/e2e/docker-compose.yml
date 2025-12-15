@@ -23,6 +23,8 @@ services:
       REDMINE_LANG: en
       HOCUSPOCUS_URL: "ws://0.0.0.0:8081"
       YJS_ENABLED: "1"
+      # Shared HMAC secret for Redmine → Hocuspocus auth tokens (32 bytes, demo value)
+      YJS_TOKEN_SECRET: "9c3b2f4a6d8e0f1a2b3c4d5e6f7081929c3b2f4a6d8e0f1a2b3c4d5e6f70819-changeme"
     ports:
       - "3000:3000"
     healthcheck:
@@ -41,6 +43,8 @@ services:
       PORT: 8081
       HOCUSPOCUS_PORT: 8081
       YJS_ENABLED: "1"
+      # Must match the secret set for Redmine above
+      YJS_TOKEN_SECRET: "9c3b2f4a6d8e0f1a2b3c4d5e6f7081929c3b2f4a6d8e0f1a2b3c4d5e6f70819-changeme"
     ports:
       - "8081:8081"
     healthcheck:

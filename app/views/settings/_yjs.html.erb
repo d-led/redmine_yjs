@@ -12,4 +12,10 @@
     <%= text_field_tag 'settings[hocuspocus_url]', @settings['hocuspocus_url'], size: 60 %>
     <em class="info"><%= l(:text_hocuspocus_url_help) %></em>
   </p>
+  
+  <p>
+    <label><%= l(:label_yjs_token_secret) %></label>
+    <%= password_field_tag 'settings[yjs_token_secret]', @settings['yjs_token_secret'], size: 60, autocomplete: 'new-password' %>
+    <em class="info"><%= l(:text_yjs_token_secret_help) %></em>
+  </p>
 </div>

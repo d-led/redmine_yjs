@@ -115,10 +115,11 @@ Set the Hocuspocus WebSocket URL:
 
 ### Environment Variables
 
-| Variable         | Default       | Description                                    |
-| ---------------- | ------------- | ---------------------------------------------- |
-| `HOCUSPOCUS_URL` | Auto-detected | WebSocket URL for Hocuspocus server            |
-| `YJS_ENABLED`    | `1`           | Enable/disable collaborative editing (`1`/`0`) |
+| Variable           | Default       | Description                                                        |
+| ------------------ | ------------- | ------------------------------------------------------------------ |
+| `HOCUSPOCUS_URL`   | Auto-detected | Browser-facing WebSocket URL (direct or proxied)                  |
+| `YJS_ENABLED`      | `1`           | Enable/disable collaborative editing (`1`/`0`)                     |
+| `YJS_TOKEN_SECRET` | _unset_       | Shared HMAC secret for signing Hocuspocus auth tokens (recommended) |
 
 The plugin auto-detects the Hocuspocus URL based on environment:
 
@@ -130,8 +131,27 @@ The plugin auto-detects the Hocuspocus URL based on environment:
 
 1. Go to **Administration → Plugins**
 2. Click **Configure** on "Redmine Yjs Collaborative Editing"
-3. Set the Hocuspocus WebSocket URL
-4. Enable/disable the plugin
+3. Set the Hocuspocus WebSocket URL (browser-facing)
+4. Optionally enable **Proxy WebSocket through Redmine (/ws)**
+5. Enable/disable the plugin
+
+### Hocuspocus Authentication
+
+For secure deployments, set the same `YJS_TOKEN_SECRET` in **both**:
+
+- Redmine (environment variable available to the app)
+- Hocuspocus (`YJS_TOKEN_SECRET` in `hocuspocus` container or process)
+
+When this secret is set:
+
+- Redmine generates a short-lived, HMAC-signed token per user + document.
+- The browser passes this token to Hocuspocus via the `token` field of `HocuspocusProvider`.
+- Hocuspocus verifies:
+  - Signature (HMAC-SHA256 over the JSON payload)
+  - Expiry timestamp
+  - That the token was issued for the exact document being opened.
+
+If `YJS_TOKEN_SECRET` is **not** set, Hocuspocus falls back to a development-only mode that trusts plain JSON identity info from the browser. **Do not use this mode in production.**
 
 ## Usage
 

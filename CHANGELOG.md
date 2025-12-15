@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Issue saves in collaborative mode no longer show conflict errors or redirects. Conflicts are handled silently by updating the lock version, allowing saves to proceed normally since Yjs CRDTs already handle merging in real-time.
 
+### Added
+
+- Optional HMAC-signed authentication between Redmine and the bundled Hocuspocus server:
+  - Redmine generates short-lived, document-bound tokens signed with `YJS_TOKEN_SECRET`.
+  - Hocuspocus verifies these tokens on connect and rejects unauthorized clients.
+  - When `YJS_TOKEN_SECRET` is not set, Hocuspocus falls back to a development-only, insecure mode.
+
 ## [0.0.2] - 2025-12-15
 
 ### Added

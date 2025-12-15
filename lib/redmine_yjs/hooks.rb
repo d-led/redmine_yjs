@@ -124,9 +124,21 @@ module RedmineYjs
         
         # Properly embed JSON for JavaScript
         # Convert Ruby hash to JavaScript object literal directly (safer than JSON.parse)
-        document_context_js = document_context.map { |k, v| 
-          "#{k.to_s}: #{v.is_a?(String) ? v.to_json : v}" 
+        document_context_js = document_context.map { |k, v|
+          "#{k.to_s}: #{v.is_a?(String) ? v.to_json : v}"
         }.join(', ')
+
+        proxy_enabled = if view.respond_to?(:yjs_websocket_proxy_enabled?)
+          view.yjs_websocket_proxy_enabled?
+        else
+          settings && settings['websocket_proxy'] == '1'
+        end
+
+        token_value = if view.respond_to?(:yjs_hocuspocus_token)
+          view.yjs_hocuspocus_token(document_context)
+        else
+          nil
+        end
         
         config_script = <<-JS
           console.log('[Yjs] Configuration script loaded');
@@ -134,6 +146,8 @@ module RedmineYjs
             window.RedmineYjsConfig = {
               hocuspocusUrl: #{hocuspocus_url.to_json},
               enabled: true,
+              websocketProxy: #{proxy_enabled ? 'true' : 'false'},
+              token: #{token_value.to_json},
               documentContext: {#{document_context_js}}
             };
             window.currentUser = {

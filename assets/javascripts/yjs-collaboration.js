@@ -1005,7 +1005,10 @@
       url: baseUrl, // Base URL - HocuspocusProvider will append '/' + documentName
       name: documentName, // Document name - appended to URL path by HocuspocusProvider
       document: ydoc,
-      token: JSON.stringify({ id: user.id, name: user.name }), // Pass user info as JSON token
+      // Use server-provided token when available; fall back to a simple JSON blob
+      // for development setups where token signing is not yet configured.
+      token: window.RedmineYjsConfig?.token ||
+             JSON.stringify({ id: user.id, name: user.name }),
       onConnect: () => {
         console.log('[Yjs] Connected to Hocuspocus:', documentName);
         // Reset reconnection retry count on successful connection
@@ -1664,7 +1667,10 @@
       url: fullUrl, // Full URL with document name appended
       name: documentName, // Document name - also sent in protocol messages
       document: ydoc,
-      token: JSON.stringify({ id: user.id, name: user.name }), // Pass user info as JSON token
+      // Use server-provided token when available; fall back to a simple JSON blob
+      // for development setups where token signing is not yet configured.
+      token: window.RedmineYjsConfig?.token ||
+             JSON.stringify({ id: user.id, name: user.name }),
       onConnect: () => {
         // Restore original WebSocket
         if (OriginalWebSocket) {
