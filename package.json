@@ -1,6 +1,6 @@
 {
   "name": "redmine-yjs-plugin",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Yjs collaborative editing plugin for Redmine",
   "private": true,
   "type": "module",
