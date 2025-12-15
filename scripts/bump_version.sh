@@ -231,6 +231,21 @@ if [ "$DRY_RUN" = true ]; then
     exit 0
 fi
 
+# Rebuild JavaScript assets before committing
+log_info "Rebuilding JavaScript assets..."
+BUILD_SCRIPT="${SCRIPT_DIR}/build-js.sh"
+if [ -f "$BUILD_SCRIPT" ]; then
+    if bash "$BUILD_SCRIPT"; then
+        log_success "JavaScript assets rebuilt"
+    else
+        log_error "Failed to rebuild JavaScript assets"
+        exit 1
+    fi
+else
+    log_error "Build script not found: $BUILD_SCRIPT"
+    exit 1
+fi
+
 # Stage all changes
 log_info "Staging changes..."
 git add "$INIT_RB"
@@ -241,6 +256,9 @@ git add "$INIT_RB"
 [ -f "$E2E_PACKAGE_JSON" ] && git add "$E2E_PACKAGE_JSON"
 [ -f "$E2E_PACKAGE_LOCK" ] && git add "$E2E_PACKAGE_LOCK"
 [ -f "$CHANGELOG" ] && git add "$CHANGELOG"
+# Stage built JavaScript assets
+[ -f "assets/javascripts/yjs-deps.bundle.js" ] && git add "assets/javascripts/yjs-deps.bundle.js"
+[ -f "assets/javascripts/yjs-collaboration.js" ] && git add "assets/javascripts/yjs-collaboration.js"
 
 # Commit
 COMMIT_MESSAGE="Bump version to $NEW_VERSION"

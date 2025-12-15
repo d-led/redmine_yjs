@@ -9,36 +9,29 @@ module RedmineYjs
         def update
           # When Yjs is enabled, always reload and update lock_version before save
           # This prevents stale object errors since Yjs CRDTs handle merging
+          # In collaborative mode, we don't call out conflicts - just update lock_version and proceed
           if yjs_enabled? && @issue && params[:issue]
             # Check if lock_version is present (indicates optimistic locking is active)
             if params[:issue][:lock_version]
               # Determine which field was being edited
               field = params[:issue].key?(:description) ? :description : :notes
               
-              # Reload to get latest lock_version and content from database
+              # Store old lock_version before reload
               old_lock_version = @issue.lock_version
-              old_content = @issue.send(field)
+              
+              # Reload to get latest lock_version from database
+              # This updates @issue.lock_version automatically
               @issue.reload
               
-              # Only redirect for merge if lock_version changed (actual conflict)
-              # Don't redirect just for content differences - let the save proceed normally
-              if old_lock_version != @issue.lock_version && old_content != @issue.send(field)
-                # Store saved content in flash to signal JavaScript to merge
-                flash[:yjs_merge_content] = @issue.send(field)
-                flash[:yjs_merge_document] = yjs_document_name(field)
-                flash[:yjs_auto_retry] = true
-                
-                # Update lock_version to current
-                params[:issue][:lock_version] = @issue.lock_version
-                
-                # Redirect back to edit page - JavaScript will merge and auto-retry
-                redirect_to edit_issue_path(@issue),
-                            notice: l(:notice_merging_changes)
-                return
-              end
+              # Update params lock_version to match current database value
+              # This bypasses Redmine's conflict detection since lock_versions will match
+              # Yjs CRDTs already handle merging in real-time, so we don't need to redirect
+              current_lock_version = @issue.lock_version
+              params[:issue][:lock_version] = current_lock_version
               
-              # No conflict or content didn't change, just update lock_version to bypass stale check
-              params[:issue][:lock_version] = @issue.lock_version
+              # Also ensure @issue object has the updated lock_version attribute
+              # Redmine may check @issue.lock_version directly, so we need to ensure it matches
+              @issue.lock_version = current_lock_version
             end
           end
           
@@ -46,24 +39,20 @@ module RedmineYjs
           update_without_yjs
         rescue ActiveRecord::StaleObjectError => e
           if yjs_enabled?
-            # Fallback: if stale error still occurs, redirect to merge and retry
+            # Fallback: if stale error still occurs, reload and retry without redirecting
             if @issue && params[:issue]
               # Determine which field was being edited
               field = params[:issue].key?(:description) ? :description : :notes
               
+              # Reload to get latest lock_version from database
               @issue.reload
               
-              # Store saved content in flash to signal JavaScript to merge
-              flash[:yjs_merge_content] = @issue.send(field)
-              flash[:yjs_merge_document] = yjs_document_name(field)
-              flash[:yjs_auto_retry] = true
-              
-              # Update lock_version to current
+              # Update params lock_version to match current database value
+              # This bypasses conflict detection - Yjs already handled merging
               params[:issue][:lock_version] = @issue.lock_version
               
-              # Redirect back to edit page - JavaScript will merge and auto-retry
-              redirect_to edit_issue_path(@issue),
-                          notice: l(:notice_merging_changes)
+              # Retry the update without redirecting
+              update_without_yjs
             else
               raise e
             end

@@ -95,10 +95,10 @@ Feature: Concurrent collaborative editing
         # User A continues editing (has unsaved changes)
         When user types " | Added after B saved" in browser A's editor
         Then browser A's editor shows "Content from A | Saved by B | Added after B saved"
-        # User A saves - this should trigger merge with B's saved content
+        # User A saves - conflicts are handled silently, save completes normally
         When user saves the issue in browser A
         # After save, verify the merged content is saved correctly
-        # Browser A is redirected after save, so navigate back to edit
+        # Save completes normally and redirects to issue show page
         Given user "admin" opens the issue in browser A
         Then browser A's editor shows "Content from A | Saved by B | Added after B saved"
         # Browser B should also see the final merged content when navigating to edit
@@ -120,13 +120,15 @@ Feature: Concurrent collaborative editing
         # User A adds more content (has unsaved changes that will conflict)
         When user types " | A's unsaved changes" in browser A's editor
         Then browser A's editor shows "Initial content | B saved first | A's unsaved changes"
-        # User A saves - this should trigger stale object error, merge, and retry
+        # User A saves - conflicts are handled silently, no error or redirect
         # The error message should NOT be shown to the user
         When user saves the issue in browser A
         # Verify no error message is shown
         Then browser A should not show "Data has been updated by another user"
+        # Verify no merge notice is shown (conflicts are handled silently)
+        Then browser A should not show "merging"
         # After save completes, verify merged content is correct
-        # Browser A is redirected after save, so navigate back to edit
+        # Save completes normally and redirects to issue show page
         Given user "admin" opens the issue in browser A
         # The merged content should include both B's saved content and A's changes
         Then browser A's editor shows "Initial content | B saved first | A's unsaved changes"

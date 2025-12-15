@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Issue saves in collaborative mode no longer show conflict errors or redirects. Conflicts are handled silently by updating the lock version, allowing saves to proceed normally since Yjs CRDTs already handle merging in real-time.
+
 ## [0.0.2] - 2025-12-15
 
 ### Added
+
 - Initial release with collaborative editing support
 - Real-time sync with conflict-free merging (CRDT)
 - User presence indicators with colored cursors
@@ -20,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic asset copying on plugin load
 
 ### Changed
+
 - Initial version bump from 0.0.1
 
 [Unreleased]: https://github.com/d-led/redmine_yjs/compare/v0.0.2...HEAD
 [0.0.2]: https://github.com/d-led/redmine_yjs/releases/tag/v0.0.2
-

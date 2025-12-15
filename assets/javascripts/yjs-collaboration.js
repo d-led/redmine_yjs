@@ -678,10 +678,16 @@
    * Returns {x, y} coordinates relative to the textarea's visible area
    */
   function calculateTextareaCursorPosition(textarea, cursorPos) {
+    // Ensure textarea is visible and laid out before calculating
+    // If textarea is hidden, getBoundingClientRect() returns incorrect values
+    if (textarea.offsetParent === null || textarea.offsetWidth === 0 || textarea.offsetHeight === 0) {
+      // Textarea is hidden, return a safe fallback position
+      // We'll recalculate when it becomes visible
+      return { x: 0, y: 0, lineHeight: 20 };
+    }
+    
     const style = window.getComputedStyle(textarea);
     const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
-    
-    // Get padding and border values
     const paddingTop = parseFloat(style.paddingTop) || 0;
     const paddingLeft = parseFloat(style.paddingLeft) || 0;
     
@@ -703,16 +709,20 @@
     mirror.style.visibility = 'hidden';
     mirror.style.whiteSpace = 'pre-wrap'; // Match textarea behavior
     mirror.style.wordWrap = 'break-word';
-    mirror.style.width = textarea.offsetWidth + 'px';
+    mirror.style.width = textarea.offsetWidth + 'px'; // Match rendered width including padding/border when border-box
     mirror.style.height = 'auto';
     mirror.style.overflow = 'visible';
+    mirror.style.boxSizing = style.boxSizing;
+    mirror.style.top = '0';
+    mirror.style.left = '0';
     
-    // Position mirror exactly where textarea is for accurate measurement
-    const textareaRect = textarea.getBoundingClientRect();
-    mirror.style.top = textareaRect.top + 'px';
-    mirror.style.left = textareaRect.left + 'px';
+    // Append to the same wrapper as the cursor container for accurate positioning
+    const wrapper = textarea.closest('.yjs-wrapper') || textarea.parentElement;
+    if (!wrapper) {
+      return { x: 0, y: 0, lineHeight: lineHeight };
+    }
     
-    document.body.appendChild(mirror);
+    wrapper.appendChild(mirror);
     
     try {
       const text = textarea.value.substring(0, cursorPos);
@@ -736,23 +746,14 @@
       // Force layout recalculation
       void mirror.offsetHeight;
       
-      // Get bounding rectangles
+      // Get bounding rectangles - both are relative to the wrapper now
       const markerRect = marker.getBoundingClientRect();
+      const wrapperRect = wrapper.getBoundingClientRect();
       
-      // Calculate position relative to textarea's top-left corner
-      // markerRect is already in viewport coordinates, textareaRect is too
-      const absoluteX = markerRect.left - textareaRect.left;
-      const absoluteY = markerRect.top - textareaRect.top;
-      
-      // Account for scroll position
-      // When textarea is scrolled, content moves but cursor container doesn't
-      const scrollTop = textarea.scrollTop;
-      const scrollLeft = textarea.scrollLeft;
-      
-      // Final position: absolute position minus scroll
-      // This gives us position relative to the visible textarea area
-      const x = absoluteX - scrollLeft;
-      const y = absoluteY - scrollTop;
+      // Calculate position relative to wrapper (which is where cursor container is)
+      // Account for textarea scroll: the cursor container does not scroll with content
+      const x = (markerRect.left - wrapperRect.left) - textarea.scrollLeft;
+      const y = (markerRect.top - wrapperRect.top) - textarea.scrollTop;
       
       return {
         x: Math.max(0, x),
@@ -766,21 +767,18 @@
       const lines = text.split('\n');
       const currentLine = lines.length - 1;
       const currentLineText = lines[currentLine] || '';
-      
-      // Estimate X from line text length (rough approximation)
-      const charWidth = parseFloat(style.fontSize) * 0.6; // Approximate character width
+      const charWidth = parseFloat(style.fontSize) * 0.6;
       const estimatedX = currentLineText.length * charWidth;
-      const yInContent = currentLine * lineHeight;
-      const scrollTop = textarea.scrollTop;
-      const scrollLeft = textarea.scrollLeft;
       
       return {
-        x: Math.max(0, paddingLeft + estimatedX - scrollLeft),
-        y: Math.max(0, paddingTop + yInContent - scrollTop),
+        x: Math.max(0, paddingLeft + estimatedX),
+        y: Math.max(0, paddingTop + (currentLine * lineHeight)),
         lineHeight: lineHeight
       };
     } finally {
-      document.body.removeChild(mirror);
+      if (mirror.parentNode) {
+        mirror.parentNode.removeChild(mirror);
+      }
     }
   }
 
@@ -1306,7 +1304,16 @@
     const cursorOffsets = new Map(); // Store cursor offsets for scroll updates (clientId -> cursorPos)
     
     // Update all cursor positions on scroll/resize (similar to CKEditor solution)
+    // Throttle updates to prevent excessive recalculations that cause cursor jumping
+    let cursorUpdateTimeout = null;
+    let pendingCursorUpdate = false;
+    
     function updateAllTextareaCursorPositions() {
+      // Skip if textarea is not visible
+      if (textarea.offsetParent === null || textarea.offsetWidth === 0 || textarea.offsetHeight === 0) {
+        return;
+      }
+      
       cursorOffsets.forEach((cursorPos, clientId) => {
         const cursorEl = remoteCursors.get(clientId);
         if (!cursorEl || cursorPos === null || cursorPos === undefined || cursorPos < 0) return;
@@ -1323,12 +1330,84 @@
           label.style.top = '-' + (parseFloat(position.lineHeight) + 4) + 'px';
         }
       });
+      
+      pendingCursorUpdate = false;
     }
     
-    // Listen for scroll events to update cursor positions (like CKEditor)
-    textarea.addEventListener('scroll', updateAllTextareaCursorPositions, { passive: true });
-    window.addEventListener('scroll', updateAllTextareaCursorPositions, { passive: true });
-    window.addEventListener('resize', updateAllTextareaCursorPositions, { passive: true });
+    // Throttled version that batches updates
+    function scheduleCursorUpdate(immediate = false) {
+      if (pendingCursorUpdate && !immediate) {
+        return; // Already scheduled
+      }
+      
+      if (cursorUpdateTimeout) {
+        clearTimeout(cursorUpdateTimeout);
+      }
+      
+      pendingCursorUpdate = true;
+      cursorUpdateTimeout = setTimeout(() => {
+        updateAllTextareaCursorPositions();
+      }, immediate ? 0 : 16); // ~60fps throttling, or immediate if requested
+    }
+    
+    // Listen for scroll events to update cursor positions (throttled)
+    textarea.addEventListener('scroll', () => scheduleCursorUpdate(), { passive: true });
+    window.addEventListener('scroll', () => scheduleCursorUpdate(), { passive: true });
+    window.addEventListener('resize', () => scheduleCursorUpdate(), { passive: true });
+    
+    // Update cursor positions when textarea becomes visible (handles hidden->visible transitions)
+    const visibilityObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting && entry.target === textarea) {
+          // Textarea became visible, update cursor positions after a short delay
+          // Single update after layout is stable, not multiple rapid updates
+          if (cursorUpdateTimeout) {
+            clearTimeout(cursorUpdateTimeout);
+          }
+          cursorUpdateTimeout = setTimeout(() => {
+            updateAllTextareaCursorPositions();
+          }, 100); // Single update after visibility change
+        }
+      });
+    }, { threshold: 0.01 });
+    
+    if (textarea.offsetParent !== null) {
+      visibilityObserver.observe(textarea);
+    } else {
+      // If textarea is hidden initially, watch for when it becomes visible
+      const checkVisibility = setInterval(() => {
+        if (textarea.offsetParent !== null) {
+          visibilityObserver.observe(textarea);
+          clearInterval(checkVisibility);
+          // Single update when it becomes visible
+          if (cursorUpdateTimeout) {
+            clearTimeout(cursorUpdateTimeout);
+          }
+          cursorUpdateTimeout = setTimeout(() => {
+            updateAllTextareaCursorPositions();
+          }, 100);
+        }
+      }, 500);
+    }
+    
+    // Also observe the form container for visibility changes
+    const formContainer = textarea.closest('#update, #issue_description_and_toolbar, form');
+    if (formContainer) {
+      const containerVisibilityObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            // Form container became visible, update cursor positions once
+            if (cursorUpdateTimeout) {
+              clearTimeout(cursorUpdateTimeout);
+            }
+            cursorUpdateTimeout = setTimeout(() => {
+              updateAllTextareaCursorPositions();
+            }, 100);
+          }
+        });
+      }, { threshold: 0.01 });
+      containerVisibilityObserver.observe(formContainer);
+    }
     
     // Listen for Yjs awareness updates (when users join/leave/update)
     // Awareness is the core Yjs facility for presence data
@@ -1980,11 +2059,40 @@
     
     // Listen for scroll events to update cursor positions
     window.addEventListener('scroll', updateAllCursorPositions, { passive: true });
-    // Also listen to CKEditor's internal scroll if it has one
+    
+    // Also listen to CKEditor's internal scroll and set up visibility observer
     editor.on('contentDom', function() {
       const editable = editor.editable();
       if (editable && editable.$) {
         editable.$.addEventListener('scroll', updateAllCursorPositions, { passive: true });
+        
+        // Update cursor positions when editor becomes visible (handles hidden->visible transitions)
+        const visibilityObserverCK = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              // Editor became visible, update cursor positions with multiple attempts
+              // This handles cases where the editor layout isn't complete yet
+              setTimeout(updateAllCursorPositions, 50);
+              setTimeout(updateAllCursorPositions, 200);
+              setTimeout(updateAllCursorPositions, 500);
+            }
+          });
+        }, { threshold: 0.01 });
+        
+        try {
+          visibilityObserverCK.observe(editable.$);
+        } catch (e) {
+          // If editable is in iframe, observe the iframe instead
+          const iframes = document.querySelectorAll('iframe');
+          for (const iframe of iframes) {
+            try {
+              if (iframe.contentDocument && editable.$.ownerDocument === iframe.contentDocument) {
+                visibilityObserverCK.observe(iframe);
+                break;
+              }
+            } catch (e) { /* cross-origin, skip */ }
+          }
+        }
       }
     });
     
@@ -2775,25 +2883,77 @@
   
   // Also watch for dynamically shown edit forms (e.g., issue edit form that's hidden initially)
   // Use MutationObserver to detect when edit forms become visible
+  // Debounce to prevent excessive reinitialization
   if (typeof MutationObserver !== 'undefined') {
+    let mutationObserverTimeout = null;
+    let lastInitializedEditorType = null; // Track what type of editor was initialized
+    
     const observer = new MutationObserver((mutations) => {
-      // Check if any edit forms became visible
-      const updateDiv = document.querySelector('#update');
-      const hasVisibleEditForm = updateDiv && 
-                                 (updateDiv.style.display !== 'none' && 
-                                  window.getComputedStyle(updateDiv).display !== 'none') &&
-                                 updateDiv.querySelector('form');
-      
-      // Also check if textareas became visible (e.g., switching from CKEditor to plain text)
-      const visibleTextareas = document.querySelectorAll('#issue_description_and_toolbar textarea:not([style*="display: none"]), #update textarea:not([style*="display: none"])');
-      const hasVisibleTextarea = visibleTextareas.length > 0;
-      
-      if ((hasVisibleEditForm || hasVisibleTextarea) && !editorsInitializing) {
-        console.log('[Yjs] Edit form or textarea became visible, initializing collaboration');
-        // Reset flags to allow re-initialization (in case editor mode changed)
-        editorsInitialized = false;
-        setTimeout(initAllEditors, 500); // Small delay to ensure form is fully rendered
+      // Debounce mutation observer callbacks to prevent excessive reinitialization
+      if (mutationObserverTimeout) {
+        clearTimeout(mutationObserverTimeout);
       }
+      
+      mutationObserverTimeout = setTimeout(() => {
+        // Check if any edit forms became visible
+        const updateDiv = document.querySelector('#update');
+        const hasVisibleEditForm = updateDiv && 
+                                   (updateDiv.style.display !== 'none' && 
+                                    window.getComputedStyle(updateDiv).display !== 'none') &&
+                                   updateDiv.querySelector('form');
+        
+        // Also check if textareas became visible (e.g., switching from CKEditor to plain text)
+        const visibleTextareas = document.querySelectorAll('#issue_description_and_toolbar textarea:not([style*="display: none"]), #update textarea:not([style*="display: none"])');
+        const hasVisibleTextarea = visibleTextareas.length > 0;
+        
+        // Check if CKEditor is active
+        const hasCKEditor = typeof CKEDITOR !== 'undefined' && 
+                           Object.keys(CKEDITOR.instances).length > 0 &&
+                           Array.from(Object.values(CKEDITOR.instances)).some(inst => 
+                             inst.element && inst.element.offsetParent !== null
+                           );
+        
+        // Determine current editor type
+        const currentEditorType = hasCKEditor ? 'ckeditor' : (hasVisibleTextarea ? 'textarea' : null);
+        
+        // Only reinitialize if:
+        // 1. Editors haven't been initialized yet, OR
+        // 2. Editor type changed (e.g., CKEditor to textarea or vice versa), OR
+        // 3. Form became visible and we haven't initialized for this form yet
+        const shouldReinitialize = (hasVisibleEditForm || hasVisibleTextarea || hasCKEditor) && 
+                                    !editorsInitializing &&
+                                    (!editorsInitialized || currentEditorType !== lastInitializedEditorType);
+        
+        if (shouldReinitialize) {
+          console.log('[Yjs] Edit form or textarea became visible, initializing collaboration');
+          // Reset flags to allow re-initialization (in case editor mode changed)
+          editorsInitialized = false;
+          lastInitializedEditorType = currentEditorType;
+          
+          setTimeout(() => {
+            initAllEditors();
+            // After initialization, update all cursor positions to fix any incorrect positions
+            // This handles the case where cursors were positioned when editor was hidden
+            setTimeout(() => {
+              activeCollaborations.forEach((collab) => {
+                if (collab.element) {
+                  // Check if it's a textarea collaboration
+                  if (collab.element.tagName === 'TEXTAREA') {
+                    // Trigger cursor position update for textarea
+                    const textarea = collab.element;
+                    if (textarea.offsetParent !== null) {
+                      // Textarea is visible, trigger update
+                      textarea.dispatchEvent(new Event('scroll', { bubbles: true }));
+                    }
+                  }
+                  // For CKEditor, the updateAllCursorPositions will be called automatically
+                  // when the editor fires scroll events
+                }
+              });
+            }, 300);
+          }, 500); // Small delay to ensure form is fully rendered
+        }
+      }, 300); // Debounce mutations by 300ms
     });
     
     // Observe changes to the document body, especially the #update div
