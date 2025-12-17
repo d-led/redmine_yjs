@@ -78,7 +78,7 @@ That's it! The plugin is now installed and ready to use.
 
 **Important**: This plugin requires a separate Hocuspocus WebSocket server. You must deploy and maintain this backend service.
 
-**Security Recommendation**: Put an authenticating proxy (e.g., nginx with authentication, Traefik, or similar) in front of both Redmine and the Hocuspocus server to ensure only authenticated users can access the collaboration features.
+**Security**: Use an authenticating proxy (e.g., OAuth2 Proxy) in front of both Redmine and Hocuspocus. WebSocket connections inherit the authenticated session. See `auth-example/oauth2proxy/` for a complete setup.
 
 #### Quick Start (Docker)
 
@@ -135,23 +135,19 @@ The plugin auto-detects the Hocuspocus URL based on environment:
 4. Optionally enable **Proxy WebSocket through Redmine (/ws)**
 5. Enable/disable the plugin
 
-### Hocuspocus Authentication
+### Security
 
-For secure deployments, set the same `YJS_TOKEN_SECRET` in **both**:
+Two authentication layers protect collaborative editing:
 
-- Redmine (environment variable available to the app)
-- Hocuspocus (`YJS_TOKEN_SECRET` in `hocuspocus` container or process)
+1. **OAuth2 Proxy** (optional, recommended): Authenticates users before accessing Redmine. WebSocket connections inherit the same authenticated session. See `auth-example/oauth2proxy/` for setup.
+2. **YJS Token Authentication**: HMAC-signed tokens verify document access. Set `YJS_TOKEN_SECRET` in both Redmine and Hocuspocus.
 
-When this secret is set:
+When `YJS_TOKEN_SECRET` is set:
+- Redmine generates short-lived, HMAC-signed tokens per user + document
+- Browser passes token to Hocuspocus via `HocuspocusProvider`
+- Hocuspocus verifies signature, expiry, and document match
 
-- Redmine generates a short-lived, HMAC-signed token per user + document.
-- The browser passes this token to Hocuspocus via the `token` field of `HocuspocusProvider`.
-- Hocuspocus verifies:
-  - Signature (HMAC-SHA256 over the JSON payload)
-  - Expiry timestamp
-  - That the token was issued for the exact document being opened.
-
-If `YJS_TOKEN_SECRET` is **not** set, Hocuspocus falls back to a development-only mode that trusts plain JSON identity info from the browser. **Do not use this mode in production.**
+Without `YJS_TOKEN_SECRET`, Hocuspocus falls back to development-only mode (not for production).
 
 #### Minimal Secure Deployment (Docker)
 

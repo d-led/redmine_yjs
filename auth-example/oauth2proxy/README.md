@@ -88,6 +88,15 @@ docker-compose up -d
 - **Redmine** (port 3001, internal): Main application, not directly exposed
 - **Hocuspocus** (port 8081, internal): WebSocket server for collaborative editing, not directly exposed
 
+## Security
+
+Two authentication layers:
+
+1. **OAuth2 Proxy**: Authenticates users via GitHub (or other OAuth2/OIDC providers). All requests, including WebSocket connections to Hocuspocus, must pass through authenticated sessions.
+2. **YJS Token Authentication**: HMAC-signed tokens verify document access. Set `YJS_TOKEN_SECRET` in both Redmine and Hocuspocus for token-based verification.
+
+WebSocket connections to `/ws/*` inherit the OAuth2 proxy session, ensuring only authenticated users can collaborate.
+
 ## How It Works
 
 1. **User Access**: User navigates to http://localhost:3000
@@ -101,6 +110,7 @@ docker-compose up -d
    - Creates user if doesn't exist
    - Logs user in automatically
 5. **Auto-Admin**: Rails initializer checks if user email is in `REDMINE_ADMIN_EMAILS` and promotes to admin
+6. **WebSocket Security**: WebSocket connections to `/ws/*` use the same authenticated session, with additional YJS token verification if `YJS_TOKEN_SECRET` is configured
 
 ## Configuration Details
 

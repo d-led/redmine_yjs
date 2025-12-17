@@ -166,14 +166,18 @@ If `YJS_TOKEN_SECRET` is **not** set, Hocuspocus falls back to a development-onl
 mode that trusts plain JSON identity info from the browser. **Do not use this mode
 in production.**
 
-### Production Security with Reverse Proxy
+### Production Security
 
-For production deployments, use an **authenticating reverse proxy** in front of Hocuspocus. This approach:
+Two authentication layers:
 
-- ✅ Avoids CORS issues (same origin as Redmine)
-- ✅ Centralizes authentication
-- ✅ Enables TLS termination
-- ✅ Provides rate limiting and DDoS protection
+1. **OAuth2 Proxy** (recommended): Authenticates users before accessing Redmine. WebSocket connections inherit the authenticated session. See `../auth-example/oauth2proxy/` for setup.
+2. **YJS Token Authentication**: HMAC-signed tokens verify document access (requires `YJS_TOKEN_SECRET`).
+
+Using an authenticating reverse proxy (e.g., OAuth2 Proxy, Traefik) provides:
+- ✅ Same-origin requests (no CORS)
+- ✅ Centralized authentication
+- ✅ TLS termination
+- ✅ Rate limiting and DDoS protection
 
 #### Traefik (Recommended)
 
