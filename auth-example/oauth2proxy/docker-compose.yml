@@ -1,0 +1,134 @@
+# Redmine + Hocuspocus + OAuth2 Proxy setup with GitHub authentication
+services:
+  redmine:
+    build:
+      context: ../..  # Plugin root directory
+      dockerfile: auth-example/oauth2proxy/Dockerfile.redmine
+      args:
+        REDMINE_TAG: ${REDMINE_TAG:-6.0}
+    depends_on:
+      hocuspocus:
+        condition: service_healthy
+    environment:
+      REDMINE_DB_SQLITE: "true"
+      CONTAINER_NAME: "redmine_oauth2"
+      RAILS_ENV: production
+      REDMINE_ADMIN_PASSWORD: ${REDMINE_ADMIN_PASSWORD:-admin123}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-test-secret-key-for-oauth2-setup}
+      WEB_CONCURRENCY: 0
+      RAILS_MAX_THREADS: 2
+      RAILS_LOG_TO_STDOUT: "true"
+      REDMINE_LOAD_DEFAULT_DATA: "true"
+      REDMINE_LANG: en
+      HOCUSPOCUS_URL: "ws://0.0.0.0:3000/ws"
+      YJS_ENABLED: "1"
+      # Shared HMAC secret for Redmine → Hocuspocus auth tokens (32 bytes, demo value)
+      YJS_TOKEN_SECRET: ${YJS_TOKEN_SECRET:-9c3b2f4a6d8e0f1a2b3c4d5e6f7081929c3b2f4a6d8e0f1a2b3c4d5e6f70819-changeme}
+      # Predefined admin emails (comma-separated) - users will be created as admins on first OAuth2 login
+      REDMINE_ADMIN_EMAILS: ${REDMINE_ADMIN_EMAILS:-}
+      # Trust proxy headers from oauth2-proxy
+      RAILS_RELATIVE_URL_ROOT: ""
+      # Enable debug logging for proxy headers
+      DEBUG_PROXY_HEADERS: "true"
+    networks:
+      - redmine_network
+    # Port not exposed - Redmine should be accessed via OAuth2 Proxy only
+    # OAuth2 proxy connects to redmine:3000 via internal network
+    # Uncomment for debugging direct access:
+    # ports:
+    #   - "3001:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  hocuspocus:
+    build:
+      context: ../../hocuspocus
+      dockerfile: Dockerfile
+    container_name: redmine_oauth2_hocuspocus
+    environment:
+      PORT: 8081
+      HOCUSPOCUS_PORT: 8081
+      YJS_ENABLED: "1"
+      # Must match the secret set for Redmine above
+      YJS_TOKEN_SECRET: ${YJS_TOKEN_SECRET:-9c3b2f4a6d8e0f1a2b3c4d5e6f7081929c3b2f4a6d8e0f1a2b3c4d5e6f70819-changeme}
+    networks:
+      - redmine_network
+    # Port not exposed - accessed via oauth2-proxy at /ws/*
+    # Uncomment for direct access during development:
+    # ports:
+    #   - "8081:8081"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:8081/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  oauth2-proxy:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.13.0
+    container_name: redmine_oauth2_proxy
+    depends_on:
+      - redmine
+      - hocuspocus
+    restart: unless-stopped
+    environment:
+      # GitHub OAuth2 configuration (required - set REDMINE_GITHUB_OAUTH2_PROXY_CLIENT_ID and REDMINE_GITHUB_OAUTH2_PROXY_CLIENT_SECRET)
+      OAUTH2_PROXY_PROVIDER: "github"
+      OAUTH2_PROXY_CLIENT_ID: ${REDMINE_GITHUB_OAUTH2_PROXY_CLIENT_ID:-}
+      OAUTH2_PROXY_CLIENT_SECRET: ${REDMINE_GITHUB_OAUTH2_PROXY_CLIENT_SECRET:-}
+      OAUTH2_PROXY_REDIRECT_URL: ${OAUTH2_PROXY_REDIRECT_URL:-http://localhost:3000/oauth2/callback}
+      # Request access token scope for GitHub (needed for X-Auth-Request-Access-Token header)
+      # user scope includes read:user and allows listing organizations
+      OAUTH2_PROXY_SCOPE: "user:email user"
+      # HTTP server configuration
+      OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:3000"
+      # Email domain configuration
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      # Path-based routing: order matters - more specific paths first
+      # /ws/* requests go to hocuspocus, everything else to redmine
+      # Note: redmine:3000 is the internal container port (not the host port 3001)
+      OAUTH2_PROXY_UPSTREAMS: "http://hocuspocus:8081/ws,http://redmine:3000"
+      # Header configuration - set headers that redmine_proxyauth expects
+      # SET_XAUTHREQUEST sets X-Auth-Request-* headers (User, Email, etc.)
+      # PASS_ACCESS_TOKEN sets X-Forwarded-Access-Token and X-Auth-Request-Access-Token
+      # The modified plugin supports both JWT tokens (OIDC) and header fallback (GitHub OAuth2)
+      # For GitHub: plugin falls back to X-Auth-Request-Email and X-Auth-Request-User headers
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "true"
+      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true"
+      OAUTH2_PROXY_PASS_BASIC_AUTH: "true"
+      OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "true"
+      # Pass user headers for redmine_proxyauth
+      OAUTH2_PROXY_PASS_USER_HEADERS: "true"
+      # Skip auth for health checks only
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "/health"
+      # Cookie configuration (must be 16, 24, or 32 bytes when base64-decoded)
+      # Generate with: openssl rand 32 | base64
+      # Default is a valid 32-byte base64-encoded string for development only (NOT secure!)
+      # This is exactly 32 bytes when base64-decoded
+      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET:-a7i9dH5rFzgwQpJ1qPw5sk1iCtj3lagWpiwxMSPRF7s=}
+      OAUTH2_PROXY_COOKIE_SECURE: "false"
+      OAUTH2_PROXY_COOKIE_HTTP_ONLY: "true"
+      OAUTH2_PROXY_COOKIE_SAMESITE: "lax"
+      # Logging
+      OAUTH2_PROXY_SILENCE_PING_LOGGING: "true"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    ports:
+      - "3000:3000"  # Host port 3000 -> Container port 3000
+    networks:
+      - redmine_network
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/localhost/3000' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  redmine_network:
+    driver: bridge
+

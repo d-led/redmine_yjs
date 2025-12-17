@@ -1,0 +1,65 @@
+# Minimal Redmine image with redmine_yjs plugin
+# Based on official Redmine image
+ARG REDMINE_TAG=6.0
+
+FROM redmine:${REDMINE_TAG}
+
+# Update system packages and install build tools for native extensions
+# Apply security updates to mitigate vulnerabilities in base image
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+    build-essential \
+    sqlite3 \
+    libsqlite3-dev \
+    libyaml-dev \
+    curl \
+    git \
+    && apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src/redmine
+
+# Copy the plugin
+COPY . /usr/src/redmine/plugins/redmine_yjs/
+
+# Clone modified redmine_proxyauth plugin (supports GitHub OAuth2 via API and headers fallback)
+# Forked repository with GitHub OAuth2 support: https://github.com/d-led/redmine_proxyauth
+RUN git clone --depth 1 https://github.com/d-led/redmine_proxyauth.git /usr/src/redmine/plugins/redmine_proxyauth
+
+# Copy plugin assets
+RUN mkdir -p /usr/src/redmine/public/plugin_assets/redmine_yjs \
+    && cp -r /usr/src/redmine/plugins/redmine_yjs/assets/* /usr/src/redmine/public/plugin_assets/redmine_yjs/ 2>/dev/null || true
+
+# Create temporary database.yml so sqlite3 gem gets installed
+RUN mkdir -p config && \
+    echo "production:" > config/database.yml && \
+    echo "  adapter: sqlite3" >> config/database.yml && \
+    echo "  database: /tmp/redmine.sqlite3" >> config/database.yml
+
+# Install plugin gems
+# Note: Gem vulnerabilities (e.g., Rack CVEs) are constrained by Redmine's Gemfile
+# and cannot be updated without potentially breaking Redmine compatibility
+RUN bundle config set --local without 'development test' && \
+    bundle config set --local path '/usr/local/bundle' && \
+    bundle install --jobs 4 --retry 3
+
+# Remove temporary database.yml (entrypoint creates the real one)
+RUN rm -f config/database.yml
+
+# Copy entrypoint script
+COPY auth-example/oauth2proxy/entrypoint.sh /usr/local/bin/oauth2proxy-entrypoint.sh
+RUN chmod +x /usr/local/bin/oauth2proxy-entrypoint.sh
+
+# Copy auto-admin initializer
+COPY auth-example/oauth2proxy/config/initializers/auto_admin.rb /usr/src/redmine/config/initializers/auto_admin.rb
+
+# Copy trust-proxy initializer (allows Redmine to read proxy headers)
+COPY auth-example/oauth2proxy/config/initializers/trust_proxy.rb /usr/src/redmine/config/initializers/trust_proxy.rb
+
+# Copy debug headers initializer (for troubleshooting)
+COPY auth-example/oauth2proxy/config/initializers/debug_headers.rb /usr/src/redmine/config/initializers/debug_headers.rb
+
+EXPOSE 3000
+
+ENTRYPOINT ["/usr/local/bin/oauth2proxy-entrypoint.sh"]
