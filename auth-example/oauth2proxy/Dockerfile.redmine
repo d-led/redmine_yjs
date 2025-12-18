@@ -23,18 +23,18 @@ WORKDIR /usr/src/redmine
 # Copy the plugin
 COPY . /usr/src/redmine/plugins/redmine_yjs/
 
-# Clone modified redmine_proxyauth plugin (supports GitHub OAuth2 via API and headers fallback)
-# Forked repository with GitHub OAuth2 support: https://github.com/d-led/redmine_proxyauth
+# Clone redmine_oauth2_proxy_auth plugin (fork of redmine_proxyauth with enhanced OAuth2 support)
+# Repository: https://github.com/d-led/redmine_oauth2_proxy_auth
 # Check out specific ref (branch, tag, or SHA) if provided via build arg, otherwise use default branch
 ARG REDMINE_PROXYAUTH_REF=
 RUN if [ -n "$REDMINE_PROXYAUTH_REF" ]; then \
       # For specific refs (branch/tag/SHA), clone full history to ensure ref is available \
-      git clone https://github.com/d-led/redmine_proxyauth.git /usr/src/redmine/plugins/redmine_proxyauth && \
+      git clone https://github.com/d-led/redmine_oauth2_proxy_auth.git /usr/src/redmine/plugins/redmine_proxyauth && \
       cd /usr/src/redmine/plugins/redmine_proxyauth && \
       git checkout "$REDMINE_PROXYAUTH_REF"; \
     else \
       # For default branch, use shallow clone for efficiency \
-      git clone --depth 1 https://github.com/d-led/redmine_proxyauth.git /usr/src/redmine/plugins/redmine_proxyauth; \
+      git clone --depth 1 https://github.com/d-led/redmine_oauth2_proxy_auth.git /usr/src/redmine/plugins/redmine_proxyauth; \
     fi
 
 # Copy plugin assets
@@ -61,20 +61,9 @@ RUN rm -f config/database.yml
 COPY auth-example/oauth2proxy/entrypoint.sh /usr/local/bin/oauth2proxy-entrypoint.sh
 RUN chmod +x /usr/local/bin/oauth2proxy-entrypoint.sh
 
-# Copy auto-admin initializer
-COPY auth-example/oauth2proxy/config/initializers/auto_admin.rb /usr/src/redmine/config/initializers/auto_admin.rb
-
-# Copy trust-proxy initializer (allows Redmine to read proxy headers)
-COPY auth-example/oauth2proxy/config/initializers/trust_proxy.rb /usr/src/redmine/config/initializers/trust_proxy.rb
-
-# Keep placeholder session_store initializer (currently no-op, but kept for clarity)
-COPY auth-example/oauth2proxy/config/initializers/session_store_path.rb /usr/src/redmine/config/initializers/session_store_path.rb
-
-# Auto-login from oauth2-proxy headers on every request (stateless SSO feel)
-COPY auth-example/oauth2proxy/config/initializers/auto_login_from_oauth2.rb /usr/src/redmine/config/initializers/auto_login_from_oauth2.rb
-
-# Copy debug headers initializer (for troubleshooting)
-COPY auth-example/oauth2proxy/config/initializers/debug_headers.rb /usr/src/redmine/config/initializers/debug_headers.rb
+# Note: Initializers are now part of the redmine_oauth2_proxy_auth plugin
+# Rails will auto-load them from plugins/redmine_proxyauth/config/initializers/
+# No need to copy them manually - they're included in the cloned plugin
 
 EXPOSE 3000
 
