@@ -6,6 +6,9 @@ services:
       dockerfile: auth-example/oauth2proxy/Dockerfile.redmine
       args:
         REDMINE_TAG: ${REDMINE_TAG:-6.0}
+        # Use the known-good redmine_proxyauth commit by default to avoid regressions.
+        # You can override this via REDMINE_PROXYAUTH_REF to try other branches/SHAs.
+        REDMINE_PROXYAUTH_REF: ${REDMINE_PROXYAUTH_REF:-82f85d4bc04bedfbb05511c6ca0bd7f2b582538c}
     depends_on:
       hocuspocus:
         condition: service_healthy

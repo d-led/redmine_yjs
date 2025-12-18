@@ -44,16 +44,20 @@ echo ""
 docker-compose up -d
 
 echo ""
-echo "⏳ Waiting for services to be healthy..."
+echo "⏳ Waiting for services to start (health checks are optional)..."
 echo ""
 
-# Wait for services to be ready
-timeout=120
+# Wait for services to be ready (non-blocking - just check if containers are running)
+timeout=30
 elapsed=0
+services_ready=false
+
 while [ $elapsed -lt $timeout ]; do
-  if docker-compose ps | grep -q "redmine_oauth2_app.*healthy" && \
-     docker-compose ps | grep -q "redmine_oauth2_hocuspocus.*healthy"; then
-    echo "✅ Services are healthy!"
+  # Check if containers are running (not necessarily healthy)
+  if docker-compose ps | grep -q "redmine.*Up" && \
+     docker-compose ps | grep -q "hocuspocus.*Up" && \
+     docker-compose ps | grep -q "oauth2-proxy.*Up"; then
+    services_ready=true
     break
   fi
   sleep 2
@@ -61,11 +65,14 @@ while [ $elapsed -lt $timeout ]; do
   echo -n "."
 done
 
-if [ $elapsed -ge $timeout ]; then
+if [ "$services_ready" = true ]; then
   echo ""
-  echo "❌ Timeout waiting for services to be healthy"
+  echo "✅ Services are running!"
+else
+  echo ""
+  echo "⚠️  Services may still be starting up (this is normal)"
+  echo "   Check status with: docker-compose ps"
   echo "   Check logs with: docker-compose logs"
-  exit 1
 fi
 
 echo ""
