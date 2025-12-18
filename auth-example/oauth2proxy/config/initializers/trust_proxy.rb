@@ -1,5 +1,10 @@
 # Trust proxy headers from oauth2-proxy
 # This allows Redmine to read X-Forwarded-* and X-Auth-Request-* headers
+# NOTE: This initializer is ONLY for OAuth2 proxy Docker setup, not for the redmine_yjs plugin itself.
+# It should only run when copied to Redmine's config/initializers in the Docker image.
+# Skip if: test environment, or if this file is being loaded from the plugin directory (not copied to Redmine)
+return if Rails.env.test? || __FILE__.include?('plugins/redmine_yjs/auth-example')
+
 Rails.application.config.force_ssl = false
 
 # Trust all proxies in Docker network (oauth2-proxy is on the same network)
