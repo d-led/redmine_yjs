@@ -298,7 +298,14 @@ EOF
     
     # Run tests
     log_info "Running Ruby tests..."
-    if RAILS_ENV=test bundle exec rake test TEST="plugins/redmine_yjs/test/**/*_test.rb" TESTOPTS="--verbose"; then
+    # Expand glob pattern to avoid minitest 6.0.0/railties 7.2.2.2 compatibility issue
+    # The glob pattern **/*_test.rb causes "wrong number of arguments" error
+    TEST_FILES=$(find plugins/redmine_yjs/test -name "*_test.rb" -type f | tr '\n' ' ')
+    if [ -z "$TEST_FILES" ]; then
+      log_warning "No test files found in plugins/redmine_yjs/test"
+      return 0
+    fi
+    if RAILS_ENV=test bundle exec rake test TEST="$TEST_FILES" TESTOPTS="--verbose"; then
       log_success "Ruby tests passed"
       return 0
     else

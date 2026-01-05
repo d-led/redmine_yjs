@@ -61,9 +61,16 @@ RUN rm -f config/database.yml
 COPY auth-example/oauth2proxy/entrypoint.sh /usr/local/bin/oauth2proxy-entrypoint.sh
 RUN chmod +x /usr/local/bin/oauth2proxy-entrypoint.sh
 
-# Note: Initializers are now part of the redmine_oauth2_proxy_auth plugin
-# Rails will auto-load them from plugins/redmine_proxyauth/config/initializers/
-# No need to copy them manually - they're included in the cloned plugin
+# Copy initializers from the plugin to Redmine's config/initializers/
+# Rails does NOT auto-load initializers from plugin directories - they must be in config/initializers/
+# This ensures the OAuth2 proxy initializers are loaded by Rails' initializer system
+RUN if [ -d /usr/src/redmine/plugins/redmine_proxyauth/config/initializers ]; then \
+      mkdir -p /usr/src/redmine/config/initializers && \
+      cp -v /usr/src/redmine/plugins/redmine_proxyauth/config/initializers/*.rb /usr/src/redmine/config/initializers/ && \
+      echo "✅ Copied $(ls /usr/src/redmine/plugins/redmine_proxyauth/config/initializers/*.rb | wc -l) initializers from plugin to Redmine config/initializers/"; \
+    else \
+      echo "⚠️  Warning: Plugin initializers directory not found"; \
+    fi
 
 EXPOSE 3000
 
