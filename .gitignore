@@ -361,3 +361,6 @@ fabric.properties
 
 
 # End of https://www.toptal.com/developers/gitignore/api/rubymine+all,ruby,node,webstorm+all,visualstudiocode
+.codebase-memory/.gitattributes
+.codebase-memory/artifact.json
+.codebase-memory/graph.db.zst
