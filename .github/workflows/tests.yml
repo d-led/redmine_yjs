@@ -1,0 +1,113 @@
+name: Tests
+
+# Fast checks: no Docker, no Redmine checkout. The Docker E2E suite lives in
+# e2e-tests.yml and only runs for changes that can affect the browser side.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  javascript:
+    name: Plugin and Hocuspocus (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      # The token contract test signs with the real Ruby implementation.
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install plugin dependencies
+        run: npm ci
+
+      - name: Plugin unit tests
+        run: npm test
+
+      - name: Hocuspocus server tests
+        working-directory: hocuspocus
+        run: |
+          npm ci
+          npm test
+
+  assets:
+    name: Generated assets match src/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install plugin dependencies
+        run: npm ci
+
+      - name: Rebuild and fail on drift
+        run: |
+          npm run build
+          if ! git diff --quiet -- assets/javascripts; then
+            echo "::error::assets/javascripts is out of date - run 'npm run build' and commit the result"
+            git diff --stat -- assets/javascripts
+            exit 1
+          fi
+
+  ruby:
+    name: Ruby without Redmine
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Syntax-check every plugin file
+        run: |
+          status=0
+          while IFS= read -r file; do
+            ruby -c "$file" > /dev/null || status=1
+          done < <(git ls-files '*.rb')
+          exit $status
+
+      - name: Document naming
+        run: ruby test/unit/document_name_test.rb
+
+      - name: Token signing
+        run: ruby test/unit/token_test.rb
+
+  e2e-types:
+    name: E2E harness type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: test/e2e/package-lock.json
+
+      - name: Install E2E dependencies
+        working-directory: test/e2e
+        run: npm ci
+
+      - name: Type check
+        working-directory: test/e2e
+        run: npx tsc --noEmit

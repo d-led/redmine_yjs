@@ -65,13 +65,10 @@ module RedmineYjs
     # - document-bound (Yjs document name)
     # - time-bound (short-lived expiry)
     #
-    # The token is a compact "<payload>.<signature>" string where:
-    # - payload   = base64url(JSON)
-    # - signature = base64url(HMAC-SHA256(secret, payload))
-    #
     # Secret is provided by YJS_TOKEN_SECRET env var and shared with Hocuspocus.
     # The document name comes from RedmineYjs::DocumentName, the same module the
-    # view hook uses to tell the browser which document to open.
+    # view hook uses to tell the browser which document to open. The wire format
+    # lives in RedmineYjs::Token.
     def yjs_hocuspocus_token(document_context)
       settings = Setting.plugin_redmine_yjs rescue nil
       # Settings value takes precedence so admins can override without touching env.
@@ -85,20 +82,12 @@ module RedmineYjs
       user = User.current
       return nil unless user&.id
 
-      payload = {
-        uid:   user.id,
+      RedmineYjs::Token.issue(
+        user_id: user.id,
         login: user.login,
-        doc:   doc,
-        exp:   Time.now.to_i + 10 * 60 # 10 minutes from now
-      }
-
-      payload_json = payload.to_json
-      signature = OpenSSL::HMAC.digest('SHA256', secret, payload_json)
-
-      encoded_payload   = Base64.urlsafe_encode64(payload_json, padding: false)
-      encoded_signature = Base64.urlsafe_encode64(signature,     padding: false)
-
-      "#{encoded_payload}.#{encoded_signature}"
+        document: doc,
+        secret: secret
+      )
     rescue StandardError => e
       Rails.logger.error "[Yjs Helper] Failed to generate Hocuspocus token: #{e.class}: #{e.message}"
       nil

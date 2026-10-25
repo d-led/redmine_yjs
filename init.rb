@@ -7,6 +7,7 @@ end
 
 require "#{base_path}/lib/redmine_yjs"
 require "#{base_path}/lib/redmine_yjs/document_name"
+require "#{base_path}/lib/redmine_yjs/token"
 require "#{base_path}/lib/redmine_yjs/application_helper_patch"
 require "#{base_path}/lib/redmine_yjs/hooks"
 require "#{base_path}/lib/redmine_yjs/wiki_controller_patch"

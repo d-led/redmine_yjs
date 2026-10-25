@@ -298,14 +298,15 @@ Assets are automatically built if missing when the plugin loads (requires Node.j
 ### Running the Tests
 
 ```bash
-# Plugin unit tests (Vitest)
+# Plugin unit tests (Vitest, includes the Ruby→Node token contract test)
 npm test
 
 # Hocuspocus server tests: boots the real server, checks token auth and sync
 cd hocuspocus && npm test
 
-# Document naming, no Redmine needed
+# No Redmine needed
 ruby test/unit/document_name_test.rb
+ruby test/unit/token_test.rb
 
 # Everything, including Ruby tests against a Redmine checkout and the Docker E2E suite
 ./scripts/run_all_tests.sh

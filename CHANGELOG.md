@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- A `Tests` workflow that runs without Docker on every push and pull request:
+  plugin unit tests on Node 22 and 24, the Hocuspocus server tests, the
+  Rails-free Ruby tests, a syntax check of every plugin file, a type check of the
+  E2E harness, and a guard that fails when `assets/javascripts` no longer matches
+  what `npm run build` produces.
+- `RedmineYjs::Token` holds the token wire format (previously inlined in the view
+  helper) and `test/unit/token_test.rb` covers it without Redmine.
+- `test/unit/token-contract.test.js` signs a token with the real Ruby
+  implementation and verifies it with the real Hocuspocus verifier, so the two
+  halves cannot drift apart unnoticed.
+
 ## [0.0.5] - 2026-10-25
 
 ### Fixed
