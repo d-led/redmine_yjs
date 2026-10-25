@@ -4,12 +4,18 @@
   "description": "Hocuspocus Yjs WebSocket server for Redmine collaborative editing",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/"
   },
   "dependencies": {
-    "@hocuspocus/server": "^3.4.1"
+    "@hocuspocus/server": "^4.7.1"
+  },
+  "devDependencies": {
+    "@hocuspocus/provider": "^4.7.1",
+    "ws": "^8.18.3",
+    "yjs": "^13.6.33"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=22.0.0"
   }
 }

@@ -68,10 +68,10 @@ module RedmineYjs
           settings && settings['yjs_enabled'] == '1'
         end
         
-        def yjs_document_name(field)
-          return nil unless @issue && @issue.project
-          field_name = field == :description ? 'description' : 'notes'
-          "issue-#{@issue.id}-#{field_name}"
+        def yjs_document_name(_field = nil)
+          return nil unless @issue
+
+          RedmineYjs::DocumentName.for(issue_id: @issue.id)
         end
       end
     end

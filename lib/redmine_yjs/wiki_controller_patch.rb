@@ -75,7 +75,8 @@ module RedmineYjs
         
         def yjs_document_name
           return nil unless @page && @page.project
-          "wiki-#{@page.project.id}-#{@page.id}-content_text"
+
+          RedmineYjs::DocumentName.for(project_id: @page.project.id, wiki_page_id: @page.id)
         end
       end
     end

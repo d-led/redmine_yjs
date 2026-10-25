@@ -7,6 +7,37 @@ module RedmineYjs
     @assets_root ||= "#{Redmine::Utils.relative_url_root}/plugin_assets/redmine_yjs"
   end
 
+  # Apply the plugin's patches to Redmine.
+  #
+  # Redmine loads plugin init.rb files from inside a `to_prepare` callback
+  # (see Redmine::PluginLoader.load), so a `to_prepare` block registered *here*
+  # is added while callbacks are already running and only fires on the next
+  # reload - which production never does. Hence: apply now, and again after
+  # every reload in development.
+  def self.apply_patches
+    return unless defined?(ApplicationController) && defined?(User)
+
+    # Apply patches to ApplicationHelper (like CKEditor does)
+    unless ApplicationHelper.included_modules.include?(RedmineYjs::ApplicationHelperPatch)
+      ApplicationHelper.send(:include, RedmineYjs::ApplicationHelperPatch)
+      Rails.logger.info '[Yjs] ApplicationHelper patch included'
+    end
+
+    # Register helper with ApplicationController so it's available in views and hooks
+    ApplicationController.send(:helper, RedmineYjs::ApplicationHelperPatch)
+
+    # Patch the controllers so collaborative saves do not fail on stale objects
+    if defined?(WikiController) && !WikiController.included_modules.include?(RedmineYjs::WikiControllerPatch)
+      WikiController.send(:include, RedmineYjs::WikiControllerPatch)
+      Rails.logger.info '[Yjs] WikiController patch included'
+    end
+
+    if defined?(IssuesController) && !IssuesController.included_modules.include?(RedmineYjs::IssuesControllerPatch)
+      IssuesController.send(:include, RedmineYjs::IssuesControllerPatch)
+      Rails.logger.info '[Yjs] IssuesController patch included'
+    end
+  end
+
   # Automatically copy assets from plugin's assets/ directory to public/plugin_assets
   # This is called on plugin initialization to ensure assets are available
   # Will attempt to build assets if they're missing

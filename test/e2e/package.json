@@ -9,13 +9,13 @@
     "prettier": "prettier -w ."
   },
   "devDependencies": {
-    "@cucumber/cucumber": "^12.3.0",
-    "@cucumber/html-formatter": "^22.2.0",
-    "@cucumber/pretty-formatter": "^2.4.1",
-    "@playwright/test": "^1.57.0",
+    "@cucumber/cucumber": "^13.3.0",
+    "@cucumber/html-formatter": "^24.2.0",
+    "@cucumber/pretty-formatter": "^4.1.0",
+    "@playwright/test": "^1.64.1",
     "@types/node": "^22.19.1",
     "cucumber-console-formatter": "^1.0.0",
-    "prettier": "^3.7.4",
+    "prettier": "^3.9.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
@@ -23,4 +23,3 @@
     "node": ">=18"
   }
 }
-

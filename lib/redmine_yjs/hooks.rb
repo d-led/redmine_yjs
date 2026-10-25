@@ -139,7 +139,11 @@ module RedmineYjs
         else
           nil
         end
-        
+
+        # The server owns the document name: the browser opens exactly the
+        # document the token was signed for, so the two can never drift apart.
+        document_name = RedmineYjs::DocumentName.for(document_context)
+
         config_script = <<-JS
           console.log('[Yjs] Configuration script loaded');
           try {
@@ -147,6 +151,7 @@ module RedmineYjs
               hocuspocusUrl: #{hocuspocus_url.to_json},
               enabled: true,
               websocketProxy: #{proxy_enabled ? 'true' : 'false'},
+              documentName: #{document_name.to_json},
               token: #{token_value.to_json},
               documentContext: {#{document_context_js}}
             };
@@ -178,9 +183,12 @@ module RedmineYjs
           # Use esm.sh CDN which provides UMD builds - load synchronously (no defer)
           # esm.sh converts ES modules to UMD format with specified global names
           # These must load BEFORE our script runs
-          result << '<script src="https://esm.sh/yjs@13.6.27?bundle&format=umd&global=Y"></script>'.html_safe
-          result << '<script src="https://esm.sh/@hocuspocus/provider@2.10.0?bundle&format=umd&global=HocuspocusProvider&deps=yjs@13.6.27"></script>'.html_safe
+          result << '<script src="https://esm.sh/yjs@13.6.33?bundle&format=umd&global=Y"></script>'.html_safe
+          result << '<script src="https://esm.sh/@hocuspocus/provider@4.7.1?bundle&format=umd&global=HocuspocusProvider&deps=yjs@13.6.33"></script>'.html_safe
         end
+
+        # Merge helpers, built from src/merge.js (see build-deps.js)
+        result << view.javascript_include_tag('yjs-merge', plugin: 'redmine_yjs', defer: false).html_safe
         
         # Use plugin: option for our own script - Redmine will serve it from plugin_assets
         # Load synchronously (no defer) - runs after dependencies are loaded

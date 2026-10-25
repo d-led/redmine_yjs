@@ -6,46 +6,22 @@ if Rails.configuration.respond_to?(:autoloader) && Rails.configuration.autoloade
 end
 
 require "#{base_path}/lib/redmine_yjs"
+require "#{base_path}/lib/redmine_yjs/document_name"
 require "#{base_path}/lib/redmine_yjs/application_helper_patch"
 require "#{base_path}/lib/redmine_yjs/hooks"
 require "#{base_path}/lib/redmine_yjs/wiki_controller_patch"
 require "#{base_path}/lib/redmine_yjs/issues_controller_patch"
 
-ActiveSupport::Reloader.to_prepare do
-  # Apply patches to ApplicationHelper (like CKEditor does)
-  unless ApplicationHelper.included_modules.include?(RedmineYjs::ApplicationHelperPatch)
-    ApplicationHelper.send(:include, RedmineYjs::ApplicationHelperPatch)
-    Rails.logger.info "[Yjs] ApplicationHelper patch included"
-  end
-  
-  # Register helper with ApplicationController so it's available in views and hooks
-  if defined?(ApplicationController)
-    ApplicationController.send(:helper, RedmineYjs::ApplicationHelperPatch)
-    Rails.logger.info "[Yjs] Helper registered with ApplicationController"
-  end
-  
-  # Patch WikiController to bypass stale object check when Yjs is enabled
-  if defined?(WikiController)
-    unless WikiController.included_modules.include?(RedmineYjs::WikiControllerPatch)
-      WikiController.send(:include, RedmineYjs::WikiControllerPatch)
-      Rails.logger.info "[Yjs] WikiController patch included"
-    end
-  end
-  
-  # Patch IssuesController to bypass stale object check when Yjs is enabled
-  if defined?(IssuesController)
-    unless IssuesController.included_modules.include?(RedmineYjs::IssuesControllerPatch)
-      IssuesController.send(:include, RedmineYjs::IssuesControllerPatch)
-      Rails.logger.info "[Yjs] IssuesController patch included"
-    end
-  end
-end
+# Redmine evaluates this file inside a to_prepare callback, so patches must be
+# applied right now; the Reloader hook only matters when development reloads.
+RedmineYjs.apply_patches
+ActiveSupport::Reloader.to_prepare { RedmineYjs.apply_patches }
 
 Redmine::Plugin.register :redmine_yjs do
   name 'Redmine Yjs Collaborative Editing'
   author 'Redmine Yjs Plugin'
   description 'Integrates Yjs CRDT-based collaborative editing with Redmine editors using Hocuspocus server'
-  version '0.0.4'
+  version '0.0.5'
   url 'https://github.com/d-led/redmine_yjs'
   author_url 'https://github.com/d-led'
   
@@ -70,7 +46,6 @@ end
 
 # Automatically copy assets to public/plugin_assets on plugin load
 # This ensures assets are available without manual copying
-ActiveSupport::Reloader.to_prepare do
-  RedmineYjs.copy_assets_to_public
-end
+RedmineYjs.copy_assets_to_public
+ActiveSupport::Reloader.to_prepare { RedmineYjs.copy_assets_to_public }
 

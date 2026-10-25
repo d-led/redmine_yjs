@@ -219,9 +219,26 @@ run_js_tests() {
   log_info "Running JavaScript unit tests..."
   if npm test; then
     log_success "JavaScript unit tests passed"
-    return 0
   else
     log_error "JavaScript unit tests failed"
+    return 1
+  fi
+
+  # The Hocuspocus server has its own tests: they boot the real server and
+  # exercise authentication and sync, which needs no Docker.
+  log_info "Running Hocuspocus server tests..."
+  cd "$PLUGIN_DIR/hocuspocus"
+  if [ ! -d "node_modules" ]; then
+    npm install || {
+      log_error "Failed to install Hocuspocus dependencies"
+      return 1
+    }
+  fi
+  if npm test; then
+    log_success "Hocuspocus server tests passed"
+    return 0
+  else
+    log_error "Hocuspocus server tests failed"
     return 1
   fi
 }

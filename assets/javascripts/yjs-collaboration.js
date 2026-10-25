@@ -83,6 +83,11 @@
     console.error('[Yjs] Check if Hocuspocus Provider library is loaded. Available globals:', Object.keys(window).filter(k => k.toLowerCase().includes('hocus')));
     throw new Error('Hocuspocus Provider library (window.HocuspocusProvider) is not available. Check if the library script is loaded correctly.');
   }
+
+  if (!window.RedmineYjsMerge) {
+    console.error('[Yjs] ERROR: window.RedmineYjsMerge is not available (assets/javascripts/yjs-merge.js)!');
+    throw new Error('Merge helpers (window.RedmineYjsMerge) are not available. Run npm run build:deps and reload.');
+  }
   
   console.log('[Yjs] Libraries loaded:', { Yjs: !!Yjs, Provider: !!Provider });
   
@@ -893,42 +898,22 @@
    * See: https://docs.yjs.dev/api/document-updates#example-listen-to-update-events
    */
   function applyDiffToYText(ydoc, ytext, oldValue, newValue) {
-    if (oldValue === newValue) return;
-    
-    // Find common prefix
-    let prefixLen = 0;
-    const minLen = Math.min(oldValue.length, newValue.length);
-    while (prefixLen < minLen && oldValue[prefixLen] === newValue[prefixLen]) {
-      prefixLen++;
-    }
-    
-    // Find common suffix (but don't overlap with prefix)
-    let suffixLen = 0;
-    while (
-      suffixLen < (oldValue.length - prefixLen) &&
-      suffixLen < (newValue.length - prefixLen) &&
-      oldValue[oldValue.length - 1 - suffixLen] === newValue[newValue.length - 1 - suffixLen]
-    ) {
-      suffixLen++;
-    }
-    
-    // Calculate what needs to change
-    const deleteStart = prefixLen;
-    const deleteCount = oldValue.length - prefixLen - suffixLen;
-    const insertText = newValue.slice(prefixLen, newValue.length - suffixLen || undefined);
-    
+    const edit = RedmineYjsMerge.minimalEdit(oldValue, newValue);
+
+    if (edit.isNoop) return;
+
     // Apply the minimal change in a transaction with LOCAL_ORIGIN
     // This allows us to distinguish local changes from remote ones
     ydoc.transact(() => {
-      if (deleteCount > 0) {
-        ytext.delete(deleteStart, deleteCount);
+      if (edit.removeCount > 0) {
+        ytext.delete(edit.start, edit.removeCount);
       }
-      if (insertText.length > 0) {
-        ytext.insert(deleteStart, insertText);
+      if (edit.insertText.length > 0) {
+        ytext.insert(edit.start, edit.insertText);
       }
     }, LOCAL_ORIGIN);
-    
-    console.debug('[Yjs] 📝 Diff applied:', { deleteStart, deleteCount, insertLen: insertText.length });
+
+    console.debug('[Yjs] 📝 Diff applied:', edit);
   }
 
   /**
@@ -2361,100 +2346,15 @@
   }
 
   /**
-   * Generate a unique document name for Yjs sync
-   * Uses document context from server-side to ensure uniqueness
+   * The document name is decided server-side (RedmineYjs::DocumentName) and
+   * shipped in window.RedmineYjsConfig, because the Hocuspocus token is signed
+   * for exactly that name. Anything else would open a document the server
+   * refuses. There is at most one collaborative document per page.
    */
-  function generateDocumentName(element) {
-    const id = element.id || '';
-    const name = element.name || '';
-    const fieldName = id || name || 'content';
-    
-    // Get document context from config (set by server-side hook)
-    const docContext = window.RedmineYjsConfig?.documentContext || {};
-    
-    // Priority: Use server-provided context first (most reliable)
-    if (docContext.issue_id) {
-      // Issue document: use simple format issue-{issue_id} for main fields
-      // For description and notes, just use issue-{id}
-      if (fieldName.includes('description') || fieldName.includes('notes')) {
-        return `issue-${docContext.issue_id}`;
-      }
-      // For other fields, include field name
-      return `issue-${docContext.issue_id}-${fieldName}`;
-    }
-    
-    if (docContext.wiki_page_id || docContext.wiki_page_title) {
-      // Wiki page document: wiki-{project_id}-{page_id_or_title}-{field}
-      const projectId = docContext.project_id || '0';
-      const pageId = docContext.wiki_page_id || docContext.wiki_page_title || 'unknown';
-      // Sanitize page title for use in document name (replace spaces/special chars)
-      const pageIdSafe = String(pageId).replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-      return `wiki-${projectId}-${pageIdSafe}-${fieldName}`;
-    }
-    
-    if (docContext.project_id) {
-      // Project-level document: project-{project_id}-{field}
-      return `project-${docContext.project_id}-${fieldName}`;
-    }
-    
-    // Fallback: Extract from URL (less reliable but better than nothing)
-    const urlMatch = window.location.pathname.match(/\/(projects|issues|wiki)\/([^\/]+)/);
-    const urlType = urlMatch ? urlMatch[1] : null;
-    const urlId = urlMatch ? urlMatch[2] : null;
-    
-    // Try to extract IDs from URL
-    const issueMatch = window.location.pathname.match(/\/issues\/(\d+)/);
-    const issueId = issueMatch ? issueMatch[1] : null;
-    
-    const projectMatch = window.location.pathname.match(/\/projects\/([^\/]+)/);
-    const projectSlug = projectMatch ? projectMatch[1] : null;
-    
-    // Try to get IDs from form data as last resort
-    const form = element.closest('form');
-    let formProjectId = null;
-    let formIssueId = null;
-    
-    if (form) {
-      const projectInput = form.querySelector('input[name*="project_id"], select[name*="project_id"]');
-      if (projectInput) {
-        formProjectId = projectInput.value || null;
-      }
-      
-      const issueInput = form.querySelector('input[name*="issue_id"], input[name*="id"]');
-      if (issueInput && issueInput.value) {
-        formIssueId = issueInput.value;
-      }
-    }
-    
-    // Generate document name with fallback priority
-    if (formIssueId || issueId) {
-      // For description and notes, use simple format issue-{id}
-      if (fieldName.includes('description') || fieldName.includes('notes')) {
-        return `issue-${formIssueId || issueId}`;
-      }
-      // For other fields, include field name
-      return `issue-${formIssueId || issueId}-${fieldName}`;
-    }
-    
-    if (urlType === 'wiki' && urlId) {
-      // Wiki page from URL: wiki-{project_slug}-{page_title}-{field}
-      const projectId = formProjectId || projectSlug || '0';
-      const pageIdSafe = String(urlId).replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-      return `wiki-${projectId}-${pageIdSafe}-${fieldName}`;
-    }
-    
-    if (formProjectId || projectSlug) {
-      return `project-${formProjectId || projectSlug}-${fieldName}`;
-    }
-    
-    // Last resort: use URL path as identifier
-    if (urlId) {
-      const pathSafe = window.location.pathname.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-      return `doc-${pathSafe}-${fieldName}`;
-    }
-    
-    console.warn('[Yjs] Could not generate unique document name for:', element.id || element.name);
-    return null;
+  function serverDocumentName() {
+    const documentName = window.RedmineYjsConfig && window.RedmineYjsConfig.documentName;
+
+    return documentName || null;
   }
 
   // Track initialization to prevent duplicate calls
@@ -2594,17 +2494,17 @@
         console.log('[Yjs] ✅ Found visible textarea:', editorId);
       }
       
-      // Generate document name FIRST and validate it BEFORE initializing
-      const documentName = generateDocumentName(textarea);
+      // Resolve the document name first: without one there is nothing to open
+      const documentName = serverDocumentName();
       if (!documentName || documentName.trim() === '') {
-        console.error('[Yjs] ❌ Cannot initialize collaboration: document name is empty or invalid');
+        console.error('[Yjs] ❌ Cannot initialize collaboration: no document name in the page config');
         console.error('[Yjs]   Element:', textarea.id || textarea.name);
         console.error('[Yjs]   Document context:', window.RedmineYjsConfig?.documentContext);
         updateCollaborationStatusWidget('disconnected', 'No document name available');
         return; // Skip this textarea
       }
       
-      console.log('[Yjs] 📄 Document name generated:', documentName, 'for field:', textarea.id || textarea.name);
+      console.log('[Yjs] 📄 Document name:', documentName, 'for field:', textarea.id || textarea.name);
       // Update widget to show we're initializing
       updateCollaborationStatusWidget('syncing', 'Initializing collaboration...');
         const collaboration = initYjsCollaboration(textarea, documentName, hocuspocusUrl, user);
@@ -2672,27 +2572,7 @@
     }
     
     const { ydoc, ytext } = collaboration;
-    const currentContent = ytext.toString();
-    
-    // If content is the same, no merge needed
-    if (currentContent === externalContent) {
-      console.log('[Yjs] Content already matches, no merge needed');
-      return true;
-    }
-    
-    // Strategy: Merge external content (from database) with current Yjs document
-    // 
-    // This handles two scenarios:
-    // 1. Saved content was previously in Yjs (normal collaborative editing case)
-    //    - Yjs CRDTs merge automatically based on shared history
-    // 2. Saved content was never in Yjs (e.g., saved directly without Yjs, or before Yjs was initialized)
-    //    - We create a temporary Y.Doc and merge it - Yjs CRDTs can merge independent states
-    //    - However, this may not preserve all local changes if content diverged significantly
-    //
-    // Note: The merge works best when the saved content was at least partially in Yjs before.
-    // If the saved content is completely new (never in Yjs), the merge might not be perfect,
-    // but Yjs will do its best to merge the states.
-    
+
     // Save current cursor position if editor is focused
     let cursorPosition = null;
     try {
@@ -2702,28 +2582,10 @@
     } catch (e) {
       // Ignore errors getting cursor position
     }
-    
-    // Create a temporary Y.Doc with the external content
-    // This represents the state that was saved to the database
-    const tempDoc = new Y.Doc();
-    const tempYtext = tempDoc.getText('content');
-    
-    // Insert external content into temp document
-    tempYtext.insert(0, externalContent || '');
-    
-    // Get the update from temp document
-    const update = Y.encodeStateAsUpdate(tempDoc);
-    
-    // Apply the update to the current document
-    // Yjs CRDTs will merge the content, attempting to preserve both:
-    // - The saved content from the database
-    // - Any local unsaved changes in the current Yjs document
-    // 
-    // This works because Yjs uses CRDTs (Conflict-free Replicated Data Types) that can
-    // merge independent states. However, if the content diverged significantly and was
-    // never in Yjs before, the merge might not be perfect.
-    Y.applyUpdate(ydoc, update);
-    
+
+    // Merge the saved state into the live document. See src/merge.js.
+    RedmineYjsMerge.reconcileWithSavedContent(Y, ydoc, ytext, externalContent);
+
     // Restore cursor position if it was saved
     if (cursorPosition !== null && collaboration.element) {
       try {
@@ -2734,10 +2596,8 @@
         // Ignore errors setting cursor position
       }
     }
-    
+
     console.log('[Yjs] ✅ Merged external content with local changes');
-    console.log('[Yjs] Before merge:', currentContent.substring(0, 50));
-    console.log('[Yjs] After merge:', ytext.toString().substring(0, 50));
     
     return true;
   }

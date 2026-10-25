@@ -55,12 +55,6 @@ module RedmineYjs
       enabled
     end
 
-    def yjs_document_name(project_id, document_type, document_id)
-      # Generate a unique document name for Yjs sync
-      # Format: project-{id}-{type}-{id}
-      "project-#{project_id}-#{document_type}-#{document_id}"
-    end
-
     def yjs_websocket_proxy_enabled?
       settings = Setting.plugin_redmine_yjs
       settings && settings['websocket_proxy'] == '1'
@@ -76,6 +70,8 @@ module RedmineYjs
     # - signature = base64url(HMAC-SHA256(secret, payload))
     #
     # Secret is provided by YJS_TOKEN_SECRET env var and shared with Hocuspocus.
+    # The document name comes from RedmineYjs::DocumentName, the same module the
+    # view hook uses to tell the browser which document to open.
     def yjs_hocuspocus_token(document_context)
       settings = Setting.plugin_redmine_yjs rescue nil
       # Settings value takes precedence so admins can override without touching env.
@@ -83,7 +79,7 @@ module RedmineYjs
       secret = ENV['YJS_TOKEN_SECRET'] if secret.empty?
       return nil if secret.to_s.strip.empty?
 
-      doc = yjs_base_document_name(document_context)
+      doc = RedmineYjs::DocumentName.for(document_context)
       return nil if doc.nil?
 
       user = User.current
@@ -105,36 +101,6 @@ module RedmineYjs
       "#{encoded_payload}.#{encoded_signature}"
     rescue StandardError => e
       Rails.logger.error "[Yjs Helper] Failed to generate Hocuspocus token: #{e.class}: #{e.message}"
-      nil
-    end
-
-    private
-
-    # Derive the canonical base document name from the document context that we
-    # also send to the browser. This must stay in sync with generateDocumentName
-    # for the main editable resources (issues, wiki pages, project docs).
-    def yjs_base_document_name(document_context)
-      ctx = document_context || {}
-
-      if ctx[:issue_id] || ctx['issue_id']
-        issue_id = ctx[:issue_id] || ctx['issue_id']
-        return "issue-#{issue_id}"
-      end
-
-      wiki_page_id    = ctx[:wiki_page_id]    || ctx['wiki_page_id']
-      wiki_page_title = ctx[:wiki_page_title] || ctx['wiki_page_title']
-      project_id      = ctx[:project_id]      || ctx['project_id']
-
-      if wiki_page_id || wiki_page_title
-        page_id = wiki_page_id || wiki_page_title
-        page_id_safe = page_id.to_s.gsub(/[^a-zA-Z0-9_-]/, '-').downcase
-        return "wiki-#{project_id || '0'}-#{page_id_safe}"
-      end
-
-      if project_id
-        return "project-#{project_id}"
-      end
-
       nil
     end
   end

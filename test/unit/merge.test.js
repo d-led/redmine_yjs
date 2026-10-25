@@ -1,141 +1,116 @@
 /**
- * Unit tests for our merge functionality
- * Tests our mergeExternalContent logic, not Yjs itself
+ * Reconciling content saved by another request into a live collaborative
+ * document (src/merge.js). Real Yjs, no stubs.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as Y from 'yjs';
+import { minimalEdit, reconcileWithSavedContent } from '../../src/merge.js';
 
-/**
- * Extract the merge logic from our implementation for testing
- * This tests OUR code, not Yjs
- */
-function mergeExternalContent(documentName, externalContent, collaboration) {
-  if (!collaboration) {
-    return false;
-  }
-  
-  const { ydoc, ytext } = collaboration;
-  const currentContent = ytext.toString();
-  
-  // Our logic: check if content is identical BEFORE merging
-  if (currentContent === externalContent) {
-    return true; // Early return - no merge needed
-  }
-  
-  // Our logic: create temp doc and merge
-  const tempDoc = new Y.Doc();
-  const tempYtext = tempDoc.getText('content');
-  tempYtext.insert(0, externalContent || '');
-  const update = Y.encodeStateAsUpdate(tempDoc);
-  Y.applyUpdate(ydoc, update);
-  
-  return true;
+function collaborativeDocument(initialText = '') {
+  const doc = new Y.Doc();
+  const text = doc.getText('content');
+
+  if (initialText) text.insert(0, initialText);
+
+  return { doc, text };
 }
 
-describe('Our Merge Functionality', () => {
-  let ydoc;
-  let ytext;
-  let collaboration;
-
-  beforeEach(() => {
-    ydoc = new Y.Doc();
-    ytext = ydoc.getText('content');
-    collaboration = { ydoc, ytext, documentName: 'test-doc' };
-  });
-
-  describe('mergeExternalContent - our implementation', () => {
-    it('should return early when content is identical', () => {
-      ytext.insert(0, 'Same content');
-      const externalContent = 'Same content';
-      
-      // Our function should detect identical content and return early
-      const result = mergeExternalContent('test-doc', externalContent, collaboration);
-      
-      expect(result).toBe(true);
-      // Content should remain unchanged (no merge happened)
-      expect(ytext.toString()).toBe('Same content');
-    });
-
-    it('should return false when collaboration is missing', () => {
-      const result = mergeExternalContent('test-doc', 'content', null);
-      expect(result).toBe(false);
-    });
-
-    it('should merge when content is different', () => {
-      ytext.insert(0, 'Hello');
-      const externalContent = 'Hello World';
-      
-      const result = mergeExternalContent('test-doc', externalContent, collaboration);
-      
-      expect(result).toBe(true);
-      // Content should be merged (Yjs handles the actual merge)
-      const merged = ytext.toString();
-      expect(merged.length).toBeGreaterThan('Hello'.length);
-    });
-
-    it('should handle empty external content', () => {
-      ytext.insert(0, 'Existing content');
-      
-      const result = mergeExternalContent('test-doc', '', collaboration);
-      
-      expect(result).toBe(true);
-      // Should still have existing content (empty doesn't match, so merge happens)
-      expect(ytext.toString()).toContain('Existing');
-    });
-
-    it('should handle empty Yjs content', () => {
-      // Yjs is empty
-      const externalContent = 'New content';
-      
-      const result = mergeExternalContent('test-doc', externalContent, collaboration);
-      
-      expect(result).toBe(true);
-      // Should have merged the external content
-      expect(ytext.toString()).toContain('New content');
-    });
-
-    it('should handle null/undefined external content', () => {
-      ytext.insert(0, 'Existing');
-      
-      const result = mergeExternalContent('test-doc', null, collaboration);
-      
-      expect(result).toBe(true);
-      // Should handle gracefully
-      expect(ytext.toString()).toBeTruthy();
+describe('minimalEdit', () => {
+  it('changes nothing when both texts match', () => {
+    expect(minimalEdit('same', 'same')).toMatchObject({
+      removeCount: 0,
+      insertText: '',
+      isNoop: true
     });
   });
 
-  describe('Content comparison logic', () => {
-    it('should correctly identify identical content', () => {
-      ytext.insert(0, 'Test content');
-      const currentContent = ytext.toString();
-      const externalContent = 'Test content';
-      
-      // Test our comparison logic
-      const isIdentical = currentContent === externalContent;
-      expect(isIdentical).toBe(true);
+  it('appends only the new tail', () => {
+    expect(minimalEdit('Hello', 'Hello World')).toEqual({
+      start: 5,
+      removeCount: 0,
+      insertText: ' World',
+      isNoop: false
     });
+  });
 
-    it('should correctly identify different content', () => {
-      ytext.insert(0, 'Content A');
-      const currentContent = ytext.toString();
-      const externalContent = 'Content B';
-      
-      // Test our comparison logic
-      const isIdentical = currentContent === externalContent;
-      expect(isIdentical).toBe(false);
+  it('removes only the deleted middle', () => {
+    expect(minimalEdit('Hello World', 'Hello')).toEqual({
+      start: 5,
+      removeCount: 6,
+      insertText: '',
+      isNoop: false
     });
+  });
 
-    it('should handle whitespace differences', () => {
-      ytext.insert(0, 'Content');
-      const currentContent = ytext.toString();
-      const externalContent = 'Content '; // trailing space
-      
-      // Our logic uses strict equality, so whitespace matters
-      const isIdentical = currentContent === externalContent;
-      expect(isIdentical).toBe(false);
+  it('replaces a word in place', () => {
+    expect(minimalEdit('Hello world', 'Hello there')).toEqual({
+      start: 6,
+      removeCount: 5,
+      insertText: 'there',
+      isNoop: false
+    });
+  });
+
+  it('keeps a shared suffix out of the edit', () => {
+    expect(minimalEdit('aaa bbb', 'ccc bbb')).toEqual({
+      start: 0,
+      removeCount: 3,
+      insertText: 'ccc',
+      isNoop: false
     });
   });
 });
 
+describe('reconcileWithSavedContent', () => {
+  it('adopts saved content into a document nobody typed in yet', () => {
+    const { doc, text } = collaborativeDocument();
+
+    const changed = reconcileWithSavedContent(Y, doc, text, 'saved while you were away');
+
+    expect(changed).toBe(true);
+    expect(text.toString()).toBe('saved while you were away');
+  });
+
+  it('takes a longer saved version without duplicating the shared part', () => {
+    const { doc, text } = collaborativeDocument('local draft');
+
+    reconcileWithSavedContent(Y, doc, text, 'local draft and more');
+
+    expect(text.toString()).toBe('local draft and more');
+  });
+
+  it('drops local wording that the saved version replaced', () => {
+    const { doc, text } = collaborativeDocument('local draft');
+
+    reconcileWithSavedContent(Y, doc, text, 'database version');
+
+    expect(text.toString()).toBe('database version');
+  });
+
+  it('reports no change when both sides already hold the same text', () => {
+    const { doc, text } = collaborativeDocument('same text');
+
+    expect(reconcileWithSavedContent(Y, doc, text, 'same text')).toBe(false);
+    expect(text.toString()).toBe('same text');
+  });
+
+  it('reports no change when there is nothing saved', () => {
+    const { doc, text } = collaborativeDocument('local only');
+
+    expect(reconcileWithSavedContent(Y, doc, text, '')).toBe(false);
+    expect(text.toString()).toBe('local only');
+  });
+
+  it('shows the saved text in the editor that was open when it happened', () => {
+    const bob = collaborativeDocument('shared start');
+    const savedElsewhere = 'shared start + alice typed + bob typed';
+
+    reconcileWithSavedContent(Y, bob.doc, bob.text, savedElsewhere);
+
+    // A snapshot carries no Yjs history, so it cannot also replay the other
+    // editor's operations; what it *must* do is leave a document without
+    // duplicated text.
+    expect(bob.text.toString()).toBe(savedElsewhere);
+  });
+});

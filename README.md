@@ -41,14 +41,14 @@ Assets are pre-built and included in the repository, so **Node.js is not require
 To use collaborative editing, you also need:
 
 - **Hocuspocus WebSocket Server**: A separate Node.js service (see [Hocuspocus Deployment](#hocuspocus-deployment))
-  - **Node.js**: 18+ (only needed for running the Hocuspocus server, not for the plugin itself)
+  - **Node.js**: 22+ (only needed for running the Hocuspocus server, not for the plugin itself)
 - **Browser**: Modern browsers with WebSocket support (Chrome, Firefox, Safari, Edge)
 
 ### For Development
 
 If you want to modify and rebuild assets:
 
-- **Node.js**: 18+
+- **Node.js**: 22.12+
 - **npm**: Comes with Node.js
 
 ## Installation
@@ -144,8 +144,13 @@ Two authentication layers protect collaborative editing:
 
 When `YJS_TOKEN_SECRET` is set:
 - Redmine generates short-lived, HMAC-signed tokens per user + document
-- Browser passes token to Hocuspocus via `HocuspocusProvider`
-- Hocuspocus verifies signature, expiry, and document match
+- The browser passes the token to Hocuspocus via `HocuspocusProvider`
+- Hocuspocus verifies signature, expiry, and that the token names the document being opened
+- Anything else is **rejected** — the secret is enforced, not advisory
+
+The document name is derived once, server-side (`RedmineYjs::DocumentName`), and
+shipped to the browser in the page config, so the token and the document the
+client opens can never drift apart.
 
 Without `YJS_TOKEN_SECRET`, Hocuspocus falls back to development-only mode (not for production).
 
@@ -289,6 +294,22 @@ bundle exec rake redmine_yjs:setup
 
 **Option 4: Automatic (on plugin load)**
 Assets are automatically built if missing when the plugin loads (requires Node.js).
+
+### Running the Tests
+
+```bash
+# Plugin unit tests (Vitest)
+npm test
+
+# Hocuspocus server tests: boots the real server, checks token auth and sync
+cd hocuspocus && npm test
+
+# Document naming, no Redmine needed
+ruby test/unit/document_name_test.rb
+
+# Everything, including Ruby tests against a Redmine checkout and the Docker E2E suite
+./scripts/run_all_tests.sh
+```
 
 ### Version Management
 
